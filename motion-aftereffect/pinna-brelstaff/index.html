@@ -32,6 +32,7 @@ h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:cente
 <div class="options" id="op"></div>
 <div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
 </div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
 <script>
 // 复刻 mot-PinnaBrelstaff: 多层同心圆环, 每层元素旋转, 环间呼吸效果
 const c=document.getElementById('c'),x=c.getContext('2d'),W=440,H=440,CX=W/2,CY=H/2;
@@ -58,12 +59,12 @@ function drawElements(rotAngle,angleOffset,clockwise){
 
 let trials,tIdx,answers,animId,tStart;
 function gen(){let t=[];t.push({type:'normal',rot:true,dir:'cw',exp:'cw'});t.push({type:'normal',rot:true,dir:'cw',exp:'cw'});t.push({type:'catch',ct:'noRot',rot:false,exp:'none'});t.push({type:'catch',ct:'ccw',rot:true,dir:'ccw',exp:'ccw'});return t.sort(()=>Math.random()-.5)}
-trials=gen();tIdx=0;answers=[];
+CAPTCHA.reset();trials=gen();tIdx=0;answers=[];
 
 function run(){if(loaded<2){setTimeout(run,200);return}if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';document.getElementById('tip').innerHTML=tr.rot?'同心环。<strong>图案看起来在旋转吗？</strong>':'静态同心环。<strong>图案在旋转吗？</strong>';x.fillStyle='#808080';x.fillRect(0,0,W,H);if(tr.rot)drawElements(0,50,tr.dir==='cw');else drawElements(0,50,true);setTimeout(()=>startAnim(tr),500)}
 function startAnim(tr){let elapsed=0,lt=performance.now(),angle=0;function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;if(tr.rot)angle+=60*dt*(tr.dir==='cw'?1:-1);x.fillStyle='#808080';x.fillRect(0,0,W,H);drawElements(angle,50,tr.dir==='cw');if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ(tr)}animId=requestAnimationFrame(anim)}
 function showQ(tr){tStart=performance.now();document.getElementById('tip').innerHTML='<strong>图案看起来在往哪个方向旋转？</strong>';document.getElementById('op').innerHTML=['逆时针很强','逆时针中等','逆时针轻微','完全不动','顺时针轻微','顺时针中等','顺时针很强'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i-3})">${l}</button>`).join('')}
 function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
-function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let noRot=answers.find(a=>a.trial.ct==='noRot');let ccw=answers.find(a=>a.trial.ct==='ccw');norm.forEach(a=>{if(a.score>0){}else total-=18});if(noRot&&noRot.score!==0)total-=30;if(ccw&&ccw.score>=0)total-=25;total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;box.style.display='block'}
-function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let noRot=answers.find(a=>a.trial.ct==='noRot');let ccw=answers.find(a=>a.trial.ct==='ccw');norm.forEach(a=>{if(a.score>0){}else total-=18});if(noRot&&noRot.score!==0)total-=30;if(ccw&&ccw.score>=0)total-=25;total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;box.style.display='block';CAPTCHA.init('pinna-brelstaff',total,total>=60,trials,function(i){tIdx=i;document.getElementById('pg').style.width=(i/trials.length*100)+'%';answers=answers.slice(0,i);run()})}
+function rst(){document.getElementById('re').style.display='none';CAPTCHA.reset();trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
 run();</script></body></html>

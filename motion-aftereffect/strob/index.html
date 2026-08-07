@@ -30,6 +30,7 @@ h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:cente
 <div class="options" id="op"></div>
 <div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
 </div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
 <script>
 // 精确复刻 mot-strob OTView.j
 // 3色(蓝绿红)各120°扇区, deltaAngle °/帧, frameInterval 跳帧间隔
@@ -65,7 +66,7 @@ t.push({type:'catch',ct:'reverse',delta:-5,interval:2,effSpeed:Math.round(5*60/2
 // 1 catch: 极低速 → 清晰方向
 t.push({type:'catch',ct:'slow',delta:1,interval:3,effSpeed:Math.round(1*60/3),expSign:1});
 return t.sort(()=>Math.random()-.5)}
-trials=gen();tIdx=0;answers=[];
+CAPTCHA.reset();trials=gen();tIdx=0;answers=[];
 
 function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
 document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
@@ -98,6 +99,6 @@ if(rev&&rev.score*rev.trial.expSign<=0)total-=20; // 反向应感知反方向
 if(slow&&slow.score*slow.trial.expSign<=0)total-=20; // 慢速应清晰
 total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
 document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
-document.getElementById('sd').textContent=`反向: ${rev&&rev.score*rev.trial.expSign>0?'✓':'✗'} | 慢速: ${slow&&slow.score*slow.trial.expSign>0?'✓':'✗'}`;box.style.display='block'}
-function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
+document.getElementById('sd').textContent=`反向: ${rev&&rev.score*rev.trial.expSign>0?'✓':'✗'} | 慢速: ${slow&&slow.score*slow.trial.expSign>0?'✓':'✗'}`;box.style.display='block';CAPTCHA.init('strob',total,total>=60,trials,function(i){tIdx=i;document.getElementById('pg').style.width=(i/trials.length*100)+'%';answers=answers.slice(0,i);run()})}
+function rst(){document.getElementById('re').style.display='none';CAPTCHA.reset();trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
 run();</script></body></html>

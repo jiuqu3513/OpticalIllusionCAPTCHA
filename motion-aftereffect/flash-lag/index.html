@@ -30,6 +30,7 @@ h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:cente
 <div class="options" id="op"></div>
 <div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
 </div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
 <script>
 // 精确复刻 mot-flashLag OTView.j selector=0
 // 旋转蓝线(lineWidth=5) + 闪烁外延段(20ms)
@@ -86,7 +87,7 @@ t.push({type:'catch',ct:'slow',rpm:2,fpm:100,flashMs:20,showFlash:true,exp:'alig
 // catch: 无闪烁 → 应看不到外延线
 t.push({type:'catch',ct:'noFlash',rpm:15,fpm:100,flashMs:20,showFlash:false,exp:'none'});
 return t.sort(()=>Math.random()-.5)}
-trials=gen();tIdx=0;answers=[];
+CAPTCHA.reset();trials=gen();tIdx=0;answers=[];
 
 function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
 document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
@@ -121,6 +122,6 @@ if(slow&&slow.score>=1){}else if(slow)total-=25;
 if(noFl&&noFl.score<=0){}else if(noFl)total-=28;
 total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
 document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
-document.getElementById('sd').textContent=`低速对齐: ${slow?.score>=1?'✓':'✗'} | 无闪: ${noFl?.score<=0?'✓':'✗'}`;box.style.display='block'}
-function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
+document.getElementById('sd').textContent=`低速对齐: ${slow?.score>=1?'✓':'✗'} | 无闪: ${noFl?.score<=0?'✓':'✗'}`;box.style.display='block';CAPTCHA.init('flash-lag',total,total>=60,trials,function(i){tIdx=i;document.getElementById('pg').style.width=(i/trials.length*100)+'%';answers=answers.slice(0,i);run()})}
+function rst(){document.getElementById('re').style.display='none';CAPTCHA.reset();trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
 run();</script></body></html>
