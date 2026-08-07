@@ -1,0 +1,106 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>认知型 CAPTCHA — 基于视觉错觉的人机验证</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.header{text-align:center;padding:48px 20px 24px}
+.header h1{font-size:28px;font-weight:700;margin-bottom:8px}
+.header p{color:#94a3b8;font-size:14px;max-width:600px;margin:0 auto;line-height:1.6}
+.section{max-width:1100px;margin:0 auto;padding:0 20px 36px}
+.section-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%}.dot.test{background:#4ade80;box-shadow:0 0 8px #4ade80}.dot.backup{background:#f59e0b}
+.category-box{background:#1a2230;border:1px solid #243044;border-radius:12px;padding:18px;margin-bottom:16px}
+.category-label{font-size:11px;color:#60a5fa;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.card{background:#1e293b;border-radius:10px;padding:16px;cursor:pointer;transition:all .2s;border:1px solid #334155;text-decoration:none;color:inherit;display:block;position:relative}
+.card:hover{background:#283548;border-color:#475569;transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.card .icon{font-size:22px;margin-bottom:4px}.card h3{font-size:13px;margin-bottom:2px;font-weight:600}.card p{font-size:11px;color:#94a3b8;line-height:1.35}
+.card .badge{position:absolute;top:8px;right:8px;font-size:9px;padding:2px 6px;border-radius:6px;font-weight:600}
+.badge.test{background:#052e16;color:#4ade80;border:1px solid #166534}
+.badge.backup{background:#2e1a05;color:#f59e0b;border:1px solid #78350f}
+.card .tag{display:inline-block;font-size:9px;padding:1px 5px;border-radius:4px;margin-right:3px;margin-top:4px;background:#1e3a5f;color:#93c5fd}
+.card.test-card{border-color:#1a4a2a}.card.test-card:hover{border-color:#4ade80}
+.card.backup-card{opacity:.72}.card.backup-card:hover{opacity:.9}
+.notice-box{max-width:1100px;margin:0 auto 24px;padding:0 20px}
+.notice-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.notice-item{background:#1a1f2b;border:1px solid #243044;border-radius:10px;padding:14px 16px}
+.notice-item strong{display:block;font-size:12px;color:#f59e0b;margin-bottom:4px}
+.notice-item p{font-size:11px;color:#94a3b8;line-height:1.5;margin:0}
+</style></head><body>
+<div class="header"><h1>🧠 认知型 CAPTCHA</h1><p>利用人类视觉系统的底层机制构建的验证挑战 — 大模型无法"感受"这些错觉</p></div>
+
+<div class="notice-box">
+  <div class="notice-grid">
+    <div class="notice-item">
+      <strong>⚠️ 健康提醒 / Health Notice</strong>
+      <p>部分错觉含闪烁、快速运动或高对比度图案，长时间观看可能引起头晕或眼部疲劳。如感不适请立即停止，注意放松眼睛。光敏性癫痫者请勿使用含闪烁的页面。</p>
+      <p style="margin-top:4px;font-style:italic">Some illusions contain flicker, rapid motion, or high-contrast patterns. Extended viewing may cause dizziness or eye strain. Stop immediately if you feel discomfort. Do not use flickering pages if you have photosensitive epilepsy.</p>
+    </div>
+    <div class="notice-item">
+      <strong>🎯 评估目标 / Evaluation Goals</strong>
+      <p>本CAPTCHA为原型测试集，并非所有错觉都适合做成验证码。请从以下维度评估每个方案：① 错觉效果是否明显 ② 选项/问题设计是否合理 ③ 评分标准是否公正 ④ 是否容易被 AI Agent 或 VLM 攻破。</p>
+      <p style="margin-top:4px;font-style:italic">This is a CAPTCHA prototype test set — not all illusions are suitable as CAPTCHAs. Evaluate each on: ① Is the illusion effect strong enough? ② Are the options/questions well designed? ③ Is the scoring fair? ④ Can AI Agents or VLMs easily defeat it?</p>
+    </div>
+    <div class="notice-item">
+      <strong>📋 测试流程 / Testing Flow</strong>
+      <p>每个 CAPTCHA 为 4–5 轮多选判断，约需 15–25 秒。完成后可查看评分明细、逐题重做，并在页面底部的反馈区提交评估意见（全部选填）。</p>
+      <p style="margin-top:4px;font-style:italic">Each CAPTCHA has 4–5 multiple-choice trials, ~15–25s. After completion: view scoring breakdown, retry individual trials, and submit optional feedback at the bottom of each page.</p>
+    </div>
+    <div class="notice-item">
+      <strong>🧪 类型多样 / Diverse Mechanisms</strong>
+      <p>本站涵盖运动后效、Phi 现象、周边漂移、知觉抑制等多种视觉机制。不同机制对不同人群的效果差异可能很大，某些类型天然不适合做 CAPTCHA——这正是需要评估的原因。</p>
+      <p style="margin-top:4px;font-style:italic">Covers motion aftereffects, phi phenomena, peripheral drift, perceptual suppression, and more. Effectiveness varies greatly across individuals and mechanisms — some types are inherently unsuitable as CAPTCHAs, which is exactly why evaluation is needed.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 待测组 ═══════════ -->
+<div class="section"><div class="section-title"><span class="dot test"></span> 待测组 — 效果明显，准备 Agent/VLM 测试</div>
+
+<!-- 运动适应后效 -->
+<div class="category-box"><div class="category-label">🌊 运动适应后效</div><div class="grid">
+<a href="motion-aftereffect/ramp/" class="card test-card"><span class="badge test">待测</span><div class="icon">📶</div><h3>渐变后效</h3><p>亮度渐变→均匀灰方块产生反向变化。ON/OFF通道适应。</p></a>
+<a href="motion-aftereffect/spokes/" class="card test-card"><span class="badge test">待测</span><div class="icon">🛞</div><h3>Spoke Illusion</h3><p>亮度波旅行辐条轮 + 意外的运动后效。官网效果明显。</p></a>
+</div></div>
+
+<!-- 运动错觉 / Phi -->
+<div class="category-box"><div class="category-label">🔄 运动错觉 / Phi 现象</div><div class="grid">
+<a href="motion-aftereffect/reverse-phi/" class="card test-card"><span class="badge test">待测</span><div class="icon">🔄</div><h3>反向 Phi 运动</h3><p>四冲程：正序/逆序播放方向相反。零适应。</p></a>
+<a href="motion-aftereffect/pinna-brelstaff/" class="card test-card"><span class="badge test">待测</span><div class="icon">🔘</div><h3>Pinna-Brelstaff</h3><p>同心环：靠近/远离屏幕时旋转方向反转。</p></a>
+<a href="motion-aftereffect/scanimation/" class="card test-card"><span class="badge test">待测</span><div class="icon">📖</div><h3>Scanimation</h3><p>移动光栅揭示隐藏运动，类似翻页书。</p></a>
+<a href="motion-aftereffect/roget/" class="card test-card"><span class="badge test">待测</span><div class="icon">🪜</div><h3>Roget's Palisade</h3><p>透过竖条纹看旋转辐条产生频闪运动。</p></a>
+<a href="motion-aftereffect/strob/" class="card test-card"><span class="badge test">待测</span><div class="icon">📐</div><h3>Stroboscopic Artifacts</h3><p>频闪采样：角速度改变感知方向和颜色融合。</p></a>
+<a href="motion-aftereffect/flash-lag/" class="card test-card"><span class="badge test">待测</span><div class="icon">⚡</div><h3>Flash-lag Effect</h3><p>闪光滞后：运动物体与闪烁标记在不同时刻被感知，产生错位。</p></a>
+<a href="motion-aftereffect/freq-doubling/" class="card test-card"><span class="badge test">待测</span><div class="icon">📊</div><h3>Frequency Doubling</h3><p>频率倍增：人眼感知双倍条纹数，AI只能数物理像素。</p></a>
+</div></div>
+
+<!-- 周边漂移 / 静态运动错觉 -->
+<div class="category-box"><div class="category-label">🐍 周边漂移 & 静态运动错觉（眼动诱发 / 静态图案产生运动感）</div><div class="grid">
+<a href="motion-aftereffect/spine-drift/" class="card test-card"><span class="badge test">待测</span><div class="icon">🦴</div><h3>Spine Drift</h3><p>完全静态的定向纹理，眼动诱发漂移感。</p></a>
+<a href="motion-aftereffect/pigeon-neck/" class="card test-card"><span class="badge test">待测</span><div class="icon">🐦</div><h3>Pigeon Neck</h3><p>鸽颈错觉：不盯时图案跳动，实际运动平滑。栅栏+运动交互。</p></a>
+<a href="motion-aftereffect/rotating-snakes/" class="card test-card"><span class="badge test">待测</span><div class="icon">🐍</div><h3>Rotating Snakes <span class="tag">标准</span></h3><p>24扇区蛇盘网格。完全静态图案产生旋转感。</p></a>
+<a href="motion-aftereffect/rotating-snakes/ad-lib/" class="card test-card"><span class="badge test">待测</span><div class="icon">⭐</div><h3>Rotating Snakes <span class="tag">Ad Lib</span></h3><p>星形多边形蛇盘。18顶点，可调配色。</p></a>
+<a href="motion-aftereffect/rotating-snakes/luminance/" class="card test-card"><span class="badge test">待测</span><div class="icon">🔲</div><h3>Rotating Snakes <span class="tag">亮度</span></h3><p>纯灰度蛇盘。24扇区(强) vs 14六边形(弱)对比。</p></a>
+<a href="motion-aftereffect/stepping-feet/linear/" class="card test-card"><span class="badge test">待测</span><div class="icon">⬌</div><h3>Stepping Feet <span class="tag">直线</span></h3><p>竖条纹背景 + 水平移动黄蓝色块。</p></a>
+<a href="motion-aftereffect/stepping-feet/circular/" class="card test-card"><span class="badge test">待测</span><div class="icon">◯</div><h3>Stepping Feet <span class="tag">圆形</span></h3><p>放射星形背景 + 旋转弧形色块。</p></a>
+</div></div>
+
+<!-- 知觉抑制 -->
+<div class="category-box"><div class="category-label">👁️ 知觉抑制</div><div class="grid">
+<a href="motion-aftereffect/motion-silencing/" class="card test-card"><span class="badge test">待测</span><div class="icon">🎨</div><h3>Motion Silences Hue</h3><p>旋转圆环中颜色变化被"静音"。2011错觉大赛冠军。</p></a>
+<a href="motion-aftereffect/motion-blindness/" class="card test-card"><span class="badge test">待测</span><div class="icon">👁️</div><h3>Motion Induced Blindness</h3><p>物理存在的黄点从意识中消失。盯中心十字。</p></a>
+</div></div>
+
+</div>
+
+<!-- ═══════════ 备用组 ═══════════ -->
+<div class="section"><div class="section-title"><span class="dot backup"></span> 备用组 — 传统运动后效，效果较弱，待后续优化</div>
+<div class="category-box"><div class="category-label">🌊 经典运动后效 (MAE)</div><div class="grid">
+<a href="motion-aftereffect/waterfall/" class="card backup-card"><span class="badge backup">备用</span><div class="icon">🌊</div><h3>瀑布错觉</h3><p>适应下移条纹后在噪声纹理上看上移。效果偏弱。</p></a>
+<a href="motion-aftereffect/spiral/" class="card backup-card"><span class="badge backup">备用</span><div class="icon">🌀</div><h3>螺旋后效</h3><p>适应旋转螺旋后在同心圆环上看反向旋转。效果弱。</p></a>
+<a href="motion-aftereffect/dots/" class="card backup-card"><span class="badge backup">备用</span><div class="icon">⚫</div><h3>随机点后效</h3><p>适应右移点群后在全新点阵上看左移。效果弱。</p></a>
+</div></div></div>
+
+<div style="text-align:center;padding:20px;color:#475569;font-size:11px">
+待测组 12 项 | 备用组 3 项 | 基于 <a href="https://michaelbach.de/ot/" style="color:#60a5fa;">michaelbach.de/ot/</a>
+</div>
+</body></html>

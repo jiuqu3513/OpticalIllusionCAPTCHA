@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scanimation (Kinegram) CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:540px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.score-detail{font-size:11px;color:#94a3b8;margin-top:8px}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.restart-btn:hover{background:#1d4ed8}.hidden{display:none!important}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>📖 Scanimation (Kinegram)</h2>
+<p class="subtitle">扫描动画 — 移动光栅揭示隐藏的运动图案，类似翻页书</p>
+<div class="instruction" id="tip">观察光栅下方的图案。<strong>你看到运动了吗？往哪个方向？</strong></div>
+<canvas id="c" width="460" height="360"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script>
+// 复刻 mot-scanimation: 竖条纹光栅 + 相移图案 → 表观运动
+const c=document.getElementById('c'),x=c.getContext('2d'),W=460,H=360;
+const BAR_W=10; // 光栅宽度
+let pattern=[],gratingX=0;
+// 生成测试图案：不同相位的条纹组
+for(let i=0;i<W/BAR_W;i++)pattern.push(Math.round(Math.sin(i*.8)*1.5+1.5)); // 0,1,2,3 四种相位
+
+let trials,tIdx,answers,animId,tStart;
+function draw(grX,speed){
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  // 画图案（4种相位的圆点行）
+  for(let i=0;i<W/BAR_W;i++){
+    let ph=pattern[i];
+    for(let y=20;y<H-20;y+=30){
+      x.fillStyle=['#2563eb','#dc2626','#16a34a','#d97706'][ph];
+      x.beginPath();x.arc(i*BAR_W+BAR_W/2,y,4,0,Math.PI*2);x.fill();
+    }
+  }
+  // 画光栅（黑色竖条纹 + 透明缝隙）
+  x.fillStyle='rgba(0,0,0,.85)';
+  for(let i=0;i<W/BAR_W+5;i++){
+    let gx=(i*BAR_W*2+grX)%(BAR_W*4);
+    x.fillRect(gx-BAR_W*2,0,BAR_W,H);
+    x.fillRect(gx+BAR_W,0,BAR_W,H);
+  }
+}
+function gen(){let t=[];t.push({type:'normal',speed:30,exp:'moving'});t.push({type:'normal',speed:-40,exp:'moving'});t.push({type:'catch',ct:'noMove',speed:0,exp:'static'});t.push({type:'catch',ct:'fast',speed:120,exp:'moving'});return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';gratingX=0;draw(0,tr.speed);setTimeout(()=>startAnim(tr),500)}
+function startAnim(tr){let elapsed=0,lt=performance.now();function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;gratingX+=tr.speed*dt;draw(gratingX,tr.speed);if(elapsed<3)animId=requestAnimationFrame(anim);else showQ(tr)}animId=requestAnimationFrame(anim)}
+function showQ(tr){tStart=performance.now();document.getElementById('tip').innerHTML='<strong>光栅下的图案看起来在动吗？哪个方向？</strong>';document.getElementById('op').innerHTML=tr.speed!==0?['向左很强','向左中等','向左轻微','完全不动','向右轻微','向右中等','向右很强'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i-3})">${l}</button>`).join(''):['明显在动','有些动感','不确定','基本静止','完全静止'].map((l,i)=>`<button class="opt-btn" onclick="ans(${2-i})">${l}</button>`).join('')}
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let noMove=answers.find(a=>a.trial.ct==='noMove');norm.forEach(a=>{if(a.score!==0){}else total-=20});if(noMove&&noMove.score!==0)total-=30;total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+run();</script></body></html>

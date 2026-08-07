@@ -1,0 +1,69 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pinna-Brelstaff CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:540px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.score-detail{font-size:11px;color:#94a3b8;margin-top:8px}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.restart-btn:hover{background:#1d4ed8}.hidden{display:none!important}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🔘 Pinna-Brelstaff 错觉</h2>
+<p class="subtitle">同心环旋转错觉 — 靠近/远离屏幕时环的旋转方向反转</p>
+<div class="instruction" id="tip"><strong>盯住中心的蓝色十字。</strong>图案在旋转吗？哪边？</div>
+<canvas id="c" width="440" height="440"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script>
+// 复刻 mot-PinnaBrelstaff: 多层同心圆环, 每层元素旋转, 环间呼吸效果
+const c=document.getElementById('c'),x=c.getContext('2d'),W=440,H=440,CX=W/2,CY=H/2;
+const IS=22,IS2=IS/2; // imageSize/2
+let img1=new Image(),img2=new Image(),loaded=0;
+img1.src='doubleGap1.gif';img1.onload=()=>loaded++;
+img2.src='doubleGap2.gif';img2.onload=()=>loaded++;
+
+function drawElements(rotAngle,angleOffset,clockwise){
+  let angOff=(angleOffset-50)/100*Math.PI/2;
+  let r=CY*.83*(1+.1*Math.cos(performance.now()/1000*1.5));
+  let ringDefs=[{n:40,img:clockwise?img1:img2},{n:32,img:clockwise?img2:img1},{n:26,img:clockwise?img1:img2},{n:18,img:clockwise?img2:img1},{n:12,img:clockwise?img1:img2}];
+  ringDefs.forEach((def,i)=>{
+    let rr=r-i*IS;
+    for(let j=0;j<def.n;j++){
+      let a=2*Math.PI*j/def.n;
+      x.save();x.translate(CX+rr*Math.cos(a),CY+rr*Math.sin(a));x.rotate(a+angOff);
+      x.drawImage(def.img,-IS2,-IS2,IS,IS);x.restore();
+    }
+  });
+  // 中心十字
+  x.strokeStyle='#00f';x.lineWidth=2;x.beginPath();x.moveTo(CX-10,CY);x.lineTo(CX+10,CY);x.moveTo(CX,CY-10);x.lineTo(CX,CY+10);x.stroke();
+}
+
+let trials,tIdx,answers,animId,tStart;
+function gen(){let t=[];t.push({type:'normal',rot:true,dir:'cw',exp:'cw'});t.push({type:'normal',rot:true,dir:'cw',exp:'cw'});t.push({type:'catch',ct:'noRot',rot:false,exp:'none'});t.push({type:'catch',ct:'ccw',rot:true,dir:'ccw',exp:'ccw'});return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(loaded<2){setTimeout(run,200);return}if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';document.getElementById('tip').innerHTML=tr.rot?'同心环。<strong>图案看起来在旋转吗？</strong>':'静态同心环。<strong>图案在旋转吗？</strong>';x.fillStyle='#808080';x.fillRect(0,0,W,H);if(tr.rot)drawElements(0,50,tr.dir==='cw');else drawElements(0,50,true);setTimeout(()=>startAnim(tr),500)}
+function startAnim(tr){let elapsed=0,lt=performance.now(),angle=0;function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;if(tr.rot)angle+=60*dt*(tr.dir==='cw'?1:-1);x.fillStyle='#808080';x.fillRect(0,0,W,H);drawElements(angle,50,tr.dir==='cw');if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ(tr)}animId=requestAnimationFrame(anim)}
+function showQ(tr){tStart=performance.now();document.getElementById('tip').innerHTML='<strong>图案看起来在往哪个方向旋转？</strong>';document.getElementById('op').innerHTML=['逆时针很强','逆时针中等','逆时针轻微','完全不动','顺时针轻微','顺时针中等','顺时针很强'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i-3})">${l}</button>`).join('')}
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let noRot=answers.find(a=>a.trial.ct==='noRot');let ccw=answers.find(a=>a.trial.ct==='ccw');norm.forEach(a=>{if(a.score>0){}else total-=18});if(noRot&&noRot.score!==0)total-=30;if(ccw&&ccw.score>=0)total-=25;total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+run();</script></body></html>

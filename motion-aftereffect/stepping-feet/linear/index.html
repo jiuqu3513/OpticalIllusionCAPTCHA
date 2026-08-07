@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stepping Feet (Linear) CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 560px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 10px; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<a href="../../../" class="back">← 首页</a>
+
+<div class="container">
+  <h2>👣 Stepping Feet (直线)</h2>
+  <p class="subtitle">Linear — 竖条纹背景 + 水平移动色块，精确复刻 mot-feetLin</p>
+
+  <div class="instruction" id="tip">
+    观察黄蓝两个色块。<strong>它们的速度始终恒定</strong>——但条纹背景让它们看起来忽快忽慢。
+  </div>
+
+  <canvas id="canvas" width="480" height="320"></canvas>
+
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+
+  <div class="options" id="options"></div>
+
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3>
+    <p id="result-desc"></p>
+    <div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+
+<script>
+// 精确复刻 mot-feetLin OTView.j 参数
+// barsPerFoot=8, feetWidth=60 → barWidth=7.5
+// feetHeight=24, speed=2 → effectiveSpeed=20px/s
+// contrastHi=0.9 → bars at 5% and 95% lightness
+// footColors: yellow(97%,97%,0) + blue(0,0,65%)
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const BAR_W = 7.5;           // 7.5px per bar (60/8)
+const FOOT_W = BAR_W * 8;    // 60px = 8 bars
+const FOOT_H = 24;           // 24px
+const SPEED = 20;            // 20 px/s (speed=2 * 10)
+const TOP_Y = 80;
+const BOT_Y = H - 80 - FOOT_H;
+const BAR_LIGHT = '#f2f2f2'; // 95% lightness
+const BAR_DARK = '#0d0d0d';  // 5% lightness
+const FOOT_TOP = '#f7f700';  // yellow: rgb(97%,97%,0)
+const FOOT_BOT = '#0000a6';  // blue: rgb(0,0,65%)
+
+let trials, trialIdx, answers, animId, trialStartTime;
+
+function draw(footX, hasGrating) {
+  if (hasGrating) {
+    for (let x = 0; x < W; x += BAR_W) {
+      ctx.fillStyle = (Math.floor(x/BAR_W) % 2 === 0) ? BAR_LIGHT : BAR_DARK;
+      ctx.fillRect(x, 0, BAR_W, H);
+    }
+  } else {
+    ctx.fillStyle = '#808080'; // 均匀灰
+    ctx.fillRect(0, 0, W, H);
+  }
+  // 上脚
+  ctx.fillStyle = FOOT_TOP; ctx.fillRect(footX, TOP_Y, FOOT_W, FOOT_H);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(footX, TOP_Y, FOOT_W, FOOT_H);
+  // 下脚
+  ctx.fillStyle = FOOT_BOT; ctx.fillRect(footX, BOT_Y, FOOT_W, FOOT_H);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(footX, BOT_Y, FOOT_W, FOOT_H);
+}
+
+function genTrials() {
+  const t = [];
+  for (let i = 0; i < 2; i++) t.push({ type:'normal', grating:true, expected:'jerky' });
+  t.push({ type:'catch', ct:'noGrating', grating:false, expected:'smooth' });
+  t.push({ type:'catch', ct:'fastSwitch', grating:true, fast:true, expected:'jerky' });
+  return t.sort(() => Math.random()-0.5);
+}
+
+trials = genTrials(); trialIdx = 0; answers = [];
+console.log('SF-linear trials:', trials.map(t=>({type:t.type,ct:t.ct,grating:t.grating})));
+
+function run() {
+  if (trialIdx >= trials.length) { showResult(); return; }
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('progress-label').textContent = `${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+  document.getElementById('tip').innerHTML = '观察黄蓝色块。<strong>它们的速度是跳跃的还是流畅的？</strong>';
+  const trial = trials[trialIdx];
+  draw(0, trial.grating);
+  setTimeout(() => startAnim(trial), 500);
+}
+
+function startAnim(trial) {
+  let fx = 0, dir = 1, elapsed = 0, lastTime = performance.now();
+  let switchTime = 0;
+  function anim(now) {
+    const dt = Math.min((now-lastTime)/1000, 0.1); lastTime = now; elapsed += dt;
+    fx += SPEED * dt * dir;
+    if (fx + FOOT_W > W) { fx = W - FOOT_W; dir = -1; }
+    if (fx < 0) { fx = 0; dir = 1; }
+    if (trial.fast && (now - switchTime > 600)) { dir *= -1; switchTime = now; }
+    draw(fx, trial.grating);
+    if (elapsed < 3.5) animId = requestAnimationFrame(anim); else showQ();
+  }
+  animId = requestAnimationFrame(anim);
+}
+
+function showQ() {
+  document.getElementById('tip').innerHTML = '<strong>色块的运动感觉是？</strong>';
+  trialStartTime = performance.now();
+  const labels = ['明显跳跃/步进','有些跳跃感','不确定','比较流畅','完全流畅匀速'];
+  document.getElementById('options').innerHTML = [-2,-1,0,1,2].map((v,i) =>
+    `<button class="opt-btn" onclick="answer(${v})">${labels[i]}</button>`).join('');
+}
+
+function answer(s) {
+  answers.push({trial:trials[trialIdx],score:s,rt:performance.now()-trialStartTime});
+  trialIdx++; document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%'; run();
+}
+
+function showResult() {
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('tip').innerHTML = '验证完成';
+  document.getElementById('progress').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${trials.length}/${trials.length}`;
+
+  let total = 100;
+  const norm = answers.filter(a=>a.trial.type==='normal');
+  const noG = answers.find(a=>a.trial.ct==='noGrating');
+  norm.forEach(a=>{if(a.score<0){}else if(a.score>0)total-=16;else total-=6;});
+  if(noG&&noG.score<0)total-=30;
+  if(answers.find(a=>a.trial.ct==='fastSwitch')?.score>=0)total-=15;
+  const rts=answers.map(a=>a.rt);if(Math.max(...rts)-Math.min(...rts)<70)total-=8;
+
+  total=Math.max(0,Math.min(100,Math.round(total)));
+  const box=document.getElementById('result');
+  box.className='result-box '+(total>=60?'pass':'fail');
+  document.getElementById('result-title').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';
+  document.getElementById('result-desc').textContent=`得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent=`无条纹对照: ${noG?.score>0?'✓流畅':'✗'}`;
+  box.style.display='block';
+}
+function restart(){document.getElementById('result').style.display='none';trials=genTrials();trialIdx=0;answers=[];document.getElementById('progress').style.width='0%';document.getElementById('progress-label').textContent='0/4';run();}
+run();
+</script>
+</body>
+</html>

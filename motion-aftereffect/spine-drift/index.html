@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spine Drift CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:580px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.score-detail{font-size:11px;color:#94a3b8;margin-top:8px}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}.restart-btn:hover{background:#1d4ed8}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🦴 Spine Drift 错觉</h2><p class="subtitle">眼动诱发相对运动 — 完全静态的图案，却看起来在流动</p>
+<div class="instruction" id="tip"><strong>让视线在图案上游走。</strong>你看到运动了吗？往哪个方向？</div>
+<canvas id="c" width="520" height="460"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script>
+// 精确复刻 mot-spineDrift OTView.j
+// spine1c.png 30x30, grid spacing=29, spineAngle=135 (默认)
+// 内矩形区域用 spineAngle, 外用45°, 奇偶格加180°
+// contrast=60 → alpha=0.6, 背景=54%灰
+// 完全静态 — 运动感来自眼动与方向性纹理的交互
+
+const c=document.getElementById('c'),x=c.getContext('2d'),W=520,H=460;
+let spineImg=new Image();spineImg.src='spine1c.png';
+let imgLoaded=false;spineImg.onload=()=>imgLoaded=true;
+
+// 过程式回退: 如果图片加载失败, 画三角
+function drawCellProc(oc,x0,y0,size,angle){
+  oc.save();oc.translate(x0+size,y0+size);oc.rotate(angle*Math.PI/180);
+  oc.fillStyle='#fcfcfc';oc.beginPath();oc.moveTo(0,0);oc.lineTo(size,0);oc.lineTo(0,size);oc.closePath();oc.fill();
+  oc.fillStyle='#030303';oc.beginPath();oc.moveTo(1,1);oc.lineTo(-size+1,1);oc.lineTo(1,-size+1);oc.closePath();oc.fill();
+  oc.restore();
+}
+
+function renderField(spineAngle,contrast){
+  let oc=document.createElement('canvas');oc.width=W;oc.height=H;let ox=oc.getContext('2d');
+  ox.fillStyle='#8a8a8a';ox.fillRect(0,0,W,H);
+  ox.globalAlpha=contrast/100;
+  let d2=29,size=30;
+  let marginRect={x:6,y:6,w:9,h:9};
+  let inRect={x:7,y:7,w:7,h:7};
+  for(let ix=0;ix*d2<W;ix++){
+    for(let iy=0;iy*d2<H;iy++){
+      let inMargin=ix>=marginRect.x&&ix<marginRect.x+marginRect.w&&iy>=marginRect.y&&iy<marginRect.y+marginRect.h;
+      let inInner=ix>=inRect.x&&ix<inRect.x+inRect.w&&iy>=inRect.y&&iy<inRect.y+inRect.h;
+      if(inMargin&&!inInner)continue;
+      let a=inInner?spineAngle:45;
+      if((iy+ix)&1)a+=180;
+      let sx=ix*d2-22,sy=iy*d2-22;
+      if(imgLoaded){ox.save();ox.translate(sx+30,sy+30);ox.rotate(-(-a+45)*Math.PI/180);ox.drawImage(spineImg,-15,-15,30,30);ox.restore()}
+      else drawCellProc(ox,sx,sy,30,a);
+    }
+  }
+  ox.globalAlpha=1;return oc;
+}
+
+let trials,tIdx,answers,tStart;
+let FIELD_CACHE={};
+function getField(spineAngle,contrast){let k=`${spineAngle}_${contrast}`;if(!FIELD_CACHE[k])FIELD_CACHE[k]=renderField(spineAngle,contrast);return FIELD_CACHE[k]}
+
+function gen(){let t=[];
+t.push({type:'normal',angle:135,contrast:60,expSign:1});  // 默认 → 某方向漂移
+t.push({type:'normal',angle:45,contrast:60,expSign:-1});   // 反角度 → 反方向漂移
+t.push({type:'catch',ct:'noContrast',angle:135,contrast:5,expSign:0}); // 极低对比 → 看不到
+t.push({type:'normal',angle:90,contrast:60,expSign:0});    // 90° → 可能两个方向
+return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+document.getElementById('tip').innerHTML='<strong>让视线在图案上游走，不要盯着一处。</strong>你看到运动了吗？';
+let field=getField(tr.angle,tr.contrast);x.drawImage(field,0,0);
+tStart=performance.now();setTimeout(()=>showQ(tr),3500)}
+
+function showQ(tr){document.getElementById('tip').innerHTML='<strong>图案看起来在往哪个方向漂移？</strong>';
+tStart=performance.now();
+document.getElementById('op').innerHTML=['向左/上很强','向左/上','轻微漂移','完全静止','轻微漂移','向右/下','向右/下很强'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i-3})">${l}</button>`).join('')}
+
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let loC=answers.find(a=>a.trial.ct==='noContrast');
+norm.forEach(a=>{if(a.score!==0){}else total-=14}); // 应有漂移感
+if(loC&&loC.score!==0)total-=30; // 低对比不应看到漂移
+total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
+document.getElementById('sd').textContent=`漂移感知: ${norm.filter(a=>a.score!==0).length}/${norm.length} | 低对比: ${loC?.score===0?'✓':'✗'}`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+// 等待图片加载
+if(!imgLoaded)spineImg.onload=()=>{imgLoaded=true;FIELD_CACHE={}};
+run();</script></body></html>

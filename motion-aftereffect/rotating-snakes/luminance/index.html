@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotating Snakes (Luminance) CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 620px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 10px; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; } .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<a href="../../../" class="back">← 首页</a>
+<div class="container">
+  <h2>🐍 Rotating Snakes (亮度)</h2>
+  <p class="subtitle">Luminance Control — 纯灰度蛇盘，精确复刻 mot-snakesLum 灰度模式</p>
+  <div class="instruction" id="tip">
+    <strong>不要盯着一个蛇盘！</strong>让视线在图案间游走，用余光感受旋转。
+  </div>
+  <canvas id="canvas" width="580" height="460"></canvas>
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+  <div class="options" id="options"></div>
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3><p id="result-desc"></p><div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+<script>
+// 复刻 mot-snakesLum 灰度模式 (col1Percent=20,col2Percent=10)
+// 4色: #000000, #333333(20%), #ffffff, #1a1a1a(10%)
+// withIllusion=YES → 24 quad/ring → 强周边漂移
+// 6-sided hexagon pattern when withIllusion=NO
+
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const W=canvas.width,H=canvas.height;
+
+let trials,trialIdx,answers,animId,trialStartTime;
+let LUM_IMG=null,HEX_IMG=null,CONTROL_IMG=null;
+
+// 24-quad disc (强错觉)
+function renderQuadDisc(cx,cy,radius,nRings,clockwise){
+  const c0='#000000',c1='#333333',c2='#ffffff',c3='#1a1a1a';
+  const nQuads=24;let dr=3,r0,r1=dr;
+  for(let ring=0;ring<nRings;ring++){
+    r0=r1;r1=r0+dr;dr+=2;
+    const da=2*Math.PI/nQuads;
+    const offset=(ring&1)?0.5:0;
+    const seq=clockwise?[c0,c1,c2,c3]:[c0,c3,c2,c1];
+    for(let i=0;i<nQuads;i++){
+      const a0=da*(i+offset),aEnd=da*(i+1+offset),seg=(aEnd-a0)/4;
+      for(let s=0;s<4;s++){
+        ctx.fillStyle=seq[s];ctx.beginPath();
+        ctx.arc(cx,cy,r1,a0+s*seg,a0+(s+1)*seg);
+        ctx.arc(cx,cy,r0,a0+(s+1)*seg,a0+s*seg,true);
+        ctx.closePath();ctx.fill();
+      }
+    }
+  }
+}
+
+// 14-hex disc (弱错觉对照)
+function renderHexDisc(cx,cy,radius,nRings){
+  const c0='#000000',c1='#333333',c2='#ffffff',c3='#1a1a1a';
+  const nHex=14;let dr=3,r0,r1=dr;
+  for(let ring=0;ring<nRings;ring++){
+    r0=r1;r1=r0+dr;dr+=2;
+    const da=2*Math.PI/nHex;
+    const offset=(ring&1)?0.5:0;
+    for(let i=0;i<nHex;i++){
+      const a0=da*(i+offset),aEnd=da*(i+1+offset),seg=(aEnd-a0)/6;
+      const seq=[c0,c3,c1,c2,c1,c3];
+      for(let s=0;s<6;s++){
+        ctx.fillStyle=seq[s];ctx.beginPath();
+        ctx.arc(cx,cy,r1,a0+s*seg,a0+(s+1)*seg);
+        ctx.arc(cx,cy,r0,a0+(s+1)*seg,a0+s*seg,true);
+        ctx.closePath();ctx.fill();
+      }
+    }
+  }
+}
+
+function renderGrid(discFn,clockwise){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const oc=c.getContext('2d');
+  oc.fillStyle='#cccccc';oc.fillRect(0,0,W,H);
+  const ox=224,oy=224;
+  oc.save();oc.translate(W/2-2*ox,H/2-1.4*oy);
+  for(let iy=0;iy<5;iy++){
+    const ixTop=(iy&1)?2:3;
+    for(let ix=0;ix<ixTop;ix++){
+      oc.translate(ox,0);
+      oc.fillStyle='#cccccc';oc.beginPath();oc.arc(0,0,ox/2,0,2*Math.PI);oc.fill();
+      if(discFn===renderQuadDisc)discFn.call?.(oc,0,0,ox/2-4,8,clockwise);
+      else discFn(0,0,ox/2-4,8);
+    }
+    oc.translate(-(2+0.5)*ox,ox/1.5);
+  }
+  oc.restore();
+  return c;
+}
+
+// Render using the closure approach
+function renderQuadGrid(clockwise){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const oc=c.getContext('2d');
+  oc.fillStyle='#cccccc';oc.fillRect(0,0,W,H);
+  const ox=224;
+  oc.save();oc.translate(W/2-2*ox,H/2-1.4*ox);
+  for(let iy=0;iy<5;iy++){
+    const ixTop=(iy&1)?2:3;
+    for(let ix=0;ix<ixTop;ix++){
+      oc.translate(ox,0);
+      oc.fillStyle='#cccccc';oc.beginPath();oc.arc(0,0,ox/2,0,2*Math.PI);oc.fill();
+      const cw=clockwise?((iy&1)===0):true;
+      // inline render
+      const c0='#000000',c1='#333333',c2='#ffffff',c3='#1a1a1a';
+      let dr=3,r0,r1=dr;
+      for(let ring=0;ring<8;ring++){
+        r0=r1;r1=r0+dr;dr+=2;
+        const da=2*Math.PI/24,offset=(ring&1)?0.5:0;
+        const seq=cw?[c0,c1,c2,c3]:[c0,c3,c2,c1];
+        for(let i=0;i<24;i++){
+          const a0=da*(i+offset),aEnd=da*(i+1+offset),seg=(aEnd-a0)/4;
+          for(let s=0;s<4;s++){
+            oc.fillStyle=seq[s];oc.beginPath();
+            oc.arc(0,0,r1,a0+s*seg,a0+(s+1)*seg);
+            oc.arc(0,0,r0,a0+(s+1)*seg,a0+s*seg,true);
+            oc.closePath();oc.fill();
+          }
+        }
+      }
+    }
+    oc.translate(-(2+0.5)*ox,ox/1.5);
+  }
+  oc.restore();
+  return c;
+}
+
+function renderHexGrid(){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const oc=c.getContext('2d');
+  oc.fillStyle='#cccccc';oc.fillRect(0,0,W,H);
+  const ox=224;
+  oc.save();oc.translate(W/2-2*ox,H/2-1.4*ox);
+  const c0='#000000',c1='#333333',c2='#ffffff',c3='#1a1a1a';
+  for(let iy=0;iy<5;iy++){
+    const ixTop=(iy&1)?2:3;
+    for(let ix=0;ix<ixTop;ix++){
+      oc.translate(ox,0);
+      oc.fillStyle='#cccccc';oc.beginPath();oc.arc(0,0,ox/2,0,2*Math.PI);oc.fill();
+      let dr=3,r0,r1=dr;
+      for(let ring=0;ring<8;ring++){
+        r0=r1;r1=r0+dr;dr+=2;
+        const offset=(ring&1)?0.5:0;
+        for(let i=0;i<14;i++){
+          const da=2*Math.PI/14,a0=da*(i+offset),aEnd=da*(i+1+offset),seg=(aEnd-a0)/6;
+          const seq=[c0,c3,c1,c2,c1,c3];
+          for(let s=0;s<6;s++){
+            oc.fillStyle=seq[s];oc.beginPath();
+            oc.arc(0,0,r1,a0+s*seg,a0+(s+1)*seg);
+            oc.arc(0,0,r0,a0+(s+1)*seg,a0+s*seg,true);
+            oc.closePath();oc.fill();
+          }
+        }
+      }
+    }
+    oc.translate(-(2+0.5)*ox,ox/1.5);
+  }
+  oc.restore();
+  return c;
+}
+
+LUM_IMG=renderQuadGrid(true);HEX_IMG=renderHexGrid();CONTROL_IMG=renderQuadGrid(false);
+
+function genTrials(){
+  const t=[];
+  t.push({type:'normal',img:LUM_IMG,desc:'24扇区蛇盘',expected:'rotating'});
+  t.push({type:'normal',img:renderQuadGrid(false),desc:'24扇区(逆序)',expected:'rotating'});
+  t.push({type:'catch',ct:'hex',img:HEX_IMG,desc:'14扇区六边形',expected:'weaker'});
+  t.push({type:'catch',ct:'animated',img:LUM_IMG,anim:true,desc:'物理旋转',expected:'rotating'});
+  return t.sort(()=>Math.random()-0.5);
+}
+trials=genTrials();trialIdx=0;answers=[];
+
+function run(){
+  if(trialIdx>=trials.length){showResult();return;}
+  document.getElementById('options').innerHTML='';
+  document.getElementById('progress-label').textContent=`${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';
+  const trial=trials[trialIdx];
+  document.getElementById('tip').innerHTML=`${trial.desc}。<strong>余光感受旋转</strong>`;
+  if(trial.anim)startAnim(trial);else showStatic(trial);
+}
+
+function showStatic(trial){
+  ctx.drawImage(trial.img,0,0);
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(W/2,H/2,5,0,2*Math.PI);ctx.fill();
+  trialStartTime=performance.now();
+  setTimeout(()=>showQ(),3000);
+}
+
+function startAnim(trial){
+  let angle=0,elapsed=0,lastTime=performance.now();
+  function anim(now){
+    const dt=Math.min((now-lastTime)/1000,0.1);lastTime=now;elapsed+=dt;
+    angle+=20*dt;ctx.fillStyle='#cccccc';ctx.fillRect(0,0,W,H);
+    ctx.save();ctx.translate(W/2,H/2);ctx.rotate(angle*Math.PI/180);
+    ctx.drawImage(trial.img,-W/2,-H/2);ctx.restore();
+    if(elapsed<3.0)animId=requestAnimationFrame(anim);else{ctx.drawImage(trial.img,0,0);showQ();}
+  }
+  animId=requestAnimationFrame(anim);
+}
+
+function showQ(){
+  document.getElementById('tip').innerHTML='<strong>蛇盘在周边视野中旋转了吗？</strong>';
+  trialStartTime=performance.now();
+  document.getElementById('options').innerHTML=['明显在旋转','有些旋转感','不确定','基本静止','完全静止'].map((l,i)=>
+    `<button class="opt-btn" onclick="answer(${2-i})">${l}</button>`).join('');
+}
+
+function answer(s){answers.push({trial:trials[trialIdx],score:s,rt:performance.now()-trialStartTime});trialIdx++;document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';run();}
+
+function showResult(){
+  document.getElementById('options').innerHTML='';document.getElementById('tip').innerHTML='验证完成';
+  document.getElementById('progress').style.width='100%';document.getElementById('progress-label').textContent=`${trials.length}/${trials.length}`;
+  let total=100;
+  const norm=answers.filter(a=>a.trial.type==='normal');
+  const hex=answers.find(a=>a.trial.ct==='hex');
+  const anim=answers.find(a=>a.trial.ct==='animated');
+  norm.forEach(a=>{if(a.score>0){}else total-=18;});
+  if(hex&&hex.score>0)total-=25; // 六边形漂移更弱，但仍有
+  if(anim&&anim.score<2)total-=22;
+  total=Math.max(0,Math.min(100,Math.round(total)));
+  const box=document.getElementById('result');
+  box.className='result-box '+(total>=60?'pass':'fail');
+  document.getElementById('result-title').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';
+  document.getElementById('result-desc').textContent=`得分: ${total}/100 (阈值: 60)`;
+  box.style.display='block';
+}
+function restart(){document.getElementById('result').style.display='none';trials=genTrials();trialIdx=0;answers=[];document.getElementById('progress').style.width='0%';document.getElementById('progress-label').textContent='0/4';run();}
+run();
+</script>
+</body>
+</html>

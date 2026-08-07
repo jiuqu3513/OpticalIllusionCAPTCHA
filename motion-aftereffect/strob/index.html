@@ -1,0 +1,103 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stroboscopic Artifacts CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:540px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.score-detail{font-size:11px;color:#94a3b8;margin-top:8px}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}.restart-btn:hover{background:#1d4ed8}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>📐 Stroboscopic Artifacts</h2><p class="subtitle">频闪采样伪影 — 不同角速度产生不同的感知旋转方向，高速时颜色融合为灰</p>
+<div class="instruction" id="tip">三色轮旋转。<strong>它看起来在往哪转？速度快慢？</strong></div>
+<canvas id="c" width="480" height="480"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/5</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script>
+// 精确复刻 mot-strob OTView.j
+// 3色(蓝绿红)各120°扇区, deltaAngle °/帧, frameInterval 跳帧间隔
+// 有效角速度 = deltaAngle * 60 / frameInterval °/s
+// 低速(~60°/s): 清晰方向 | 中速(~180°/s): 频闪反向 | 高速(>300°/s): 色彩融合
+
+const c=document.getElementById('c'),x=c.getContext('2d'),W=480,H=480,CX=W/2,CY=H/2;
+const R=0.7*CY,COLORS=['#00f','#0f0','#f00'];
+let angle=0;
+
+function drawWheel(){
+  x.fillStyle='#bfbfbf';x.fillRect(0,0,W,H);
+  x.save();x.translate(CX,CY);x.rotate(angle*Math.PI/180);
+  for(let i=0;i<3;i++){
+    x.fillStyle=COLORS[i];x.beginPath();x.moveTo(0,0);x.lineTo(R,0);
+    // 120° 扇形: arc 从 0 到 2π/3
+    x.arc(0,0,R,0,2*Math.PI/3);x.closePath();x.fill();
+    x.rotate(2*Math.PI/3);
+  }
+  x.restore();
+}
+
+let trials,tIdx,answers,animId,tStart;
+// 速度方案 (°/s): deltaAngle=5, frameInterval 决定有效速度
+function gen(){let t=[];
+// 2 正常: 中低速 → 应能感知方向
+t.push({type:'normal',delta:5,interval:3,effSpeed:Math.round(5*60/3),expSign:1});
+t.push({type:'normal',delta:8,interval:2,effSpeed:Math.round(8*60/2),expSign:1});
+// 1 高速 >300°/s → 应看到灰色/色彩融合
+t.push({type:'normal',delta:12,interval:1,effSpeed:Math.round(12*60/1),expSign:1,highSpeed:true});
+// 1 catch: 反向旋转
+t.push({type:'catch',ct:'reverse',delta:-5,interval:2,effSpeed:Math.round(5*60/2),expSign:-1});
+// 1 catch: 极低速 → 清晰方向
+t.push({type:'catch',ct:'slow',delta:1,interval:3,effSpeed:Math.round(1*60/3),expSign:1});
+return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+angle=0;drawWheel();document.getElementById('tip').innerHTML=`<strong>三色轮旋转中…</strong>注意方向和速度感 (${tr.effSpeed}°/s)`;
+setTimeout(()=>startAnim(tr),500)}
+
+function startAnim(tr){let elapsed=0,lt=performance.now(),fc=0;
+function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;fc++;
+  if(fc>=tr.interval){angle+=tr.delta;fc=0}
+  drawWheel();
+  if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ(tr)}
+animId=requestAnimationFrame(anim)}
+
+function showQ(tr){tStart=performance.now();
+drawWheel(); // 最后一帧静止供观察
+document.getElementById('tip').innerHTML='<strong>三色轮看起来在往哪个方向旋转？</strong>';
+document.getElementById('op').innerHTML=['逆时针很快','逆时针','逆时针慢','不动/灰/看不清','顺时针慢','顺时针','顺时针很快'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i-3})">${l}</button>`).join('')}
+
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let rev=answers.find(a=>a.trial.ct==='reverse');let slow=answers.find(a=>a.trial.ct==='slow');
+// 正常: 应感知到旋转 (score != 0), 高速可能看灰 (score=0 可接受)
+let hiSp=norm.filter(a=>a.trial.highSpeed);let loSp=norm.filter(a=>!a.trial.highSpeed);
+loSp.forEach(a=>{if(a.score*a.trial.expSign>0){}else total-=14});
+hiSp.forEach(a=>{if(a.score===0){}else if(Math.abs(a.score)<=1)total-=5;else total-=10}); // 高速应模糊
+if(rev&&rev.score*rev.trial.expSign<=0)total-=20; // 反向应感知反方向
+if(slow&&slow.score*slow.trial.expSign<=0)total-=20; // 慢速应清晰
+total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
+document.getElementById('sd').textContent=`反向: ${rev&&rev.score*rev.trial.expSign>0?'✓':'✗'} | 慢速: ${slow&&slow.score*slow.trial.expSign>0?'✓':'✗'}`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
+run();</script></body></html>

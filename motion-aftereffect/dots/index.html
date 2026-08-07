@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随机点运动后效 CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 520px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 10px; background: #2a2a2a; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<a href="../../" class="back">← 首页</a>
+
+<div class="container">
+  <h2>⚫ 随机点运动后效验证</h2>
+  <p class="subtitle">Random Dot MAE — 适应运动点群后在全新静止点阵上看到反向漂移</p>
+
+  <div class="instruction" id="tip">
+    即将开始。请<strong>死死盯住中心十字</strong>，不要追视任何圆点。
+  </div>
+
+  <canvas id="canvas" width="480" height="360"></canvas>
+
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+
+  <div class="options" id="options"></div>
+
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3>
+    <p id="result-desc"></p>
+    <div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 关键设计：适应刺激 ≠ 测试刺激
+//   适应：350 个白点一致向右漂移
+//   测试：全新的随机点阵（不同位置）+ 红色参照锚点
+//   后效：测试白点相对红点看起来向左漂移
+//   参考：mot-adapt 测试在佛像照片上（完全不同纹理）
+// ============================================================
+
+const CFG = {
+  adaptationSec: 7.5,          // ⬆ 更长适应
+  blankMs: 300,
+  dotCount: 350,               // ⬆ 更多点
+  dotSpeed: 120,               // ⬆ 更快
+  anchorCount: 12,
+  bgColor: '#2a2a2a',
+  dotColor: '#e8e8e8',
+  anchorColor: '#ef4444',
+};
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2;
+const MARGIN = 25;
+
+let trials, trialIdx, answers, animId, trialStartTime;
+let ADAPT_DOTS = [];   // 适应阶段用的点（会移动）
+let TEST_DOTS = [];    // 测试阶段用的点（全新位置！）
+let ANCHOR_DOTS = [];  // 参照锚点
+
+// ============ 生成随机位置 ============
+function genDots(count, minR, maxR) {
+  const dots = [], m = MARGIN;
+  for (let i = 0; i < count; i++) {
+    dots.push({
+      x: m + Math.random()*(W-m*2),
+      y: m + Math.random()*(H-m*2),
+      r: (minR || 3.5) + Math.random()*(maxR || 2.5),
+    });
+  }
+  return dots;
+}
+
+function genAnchors() {
+  const a = [], m = 40;
+  for (let i = 0; i < CFG.anchorCount; i++) {
+    a.push({ x: m + Math.random()*(W-m*2), y: m + Math.random()*(H-m*2), r: 3.5+Math.random()*2 });
+  }
+  return a;
+}
+
+// ============ 注视十字 ============
+function drawFixation() {
+  const sz = 14;
+  ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(CX-sz, CY); ctx.lineTo(CX+sz, CY);
+  ctx.moveTo(CX, CY-sz); ctx.lineTo(CX, CY+sz);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(239,68,68,0.4)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CX, CY, sz+3, 0, Math.PI*2); ctx.stroke();
+}
+
+function drawBG() {
+  ctx.fillStyle = CFG.bgColor; ctx.fillRect(0,0,W,H);
+}
+
+function drawDots(dots, color) {
+  ctx.fillStyle = color;
+  dots.forEach(d => { ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2); ctx.fill(); });
+}
+
+// 测试场景：全新随机点阵 + 红点参照
+function drawTestScene() {
+  drawBG();
+  drawDots(TEST_DOTS, CFG.dotColor);     // 全新白点位置！
+  drawDots(ANCHOR_DOTS, CFG.anchorColor); // 红点参照
+  drawFixation();
+}
+
+// ============ TRIALS ============
+function generateTrials() {
+  const t = [];
+  for (let i = 0; i < 3; i++) {
+    t.push({
+      type: 'normal', direction: 'right',
+      duration: CFG.adaptationSec + (Math.random()-0.5)*1.2,
+      expectedSign: -1, // 适应向右→后效向左(负)
+    });
+  }
+  t.push({ type: 'catch', catchType: 'zero', duration: 0, expectedSign: 0 });
+  return t.sort(() => Math.random()-0.5);
+}
+
+// ============ FLOW ============
+ADAPT_DOTS = genDots(CFG.dotCount, 3.5, 3.0);
+TEST_DOTS = genDots(CFG.dotCount, 3.5, 3.0);   // 全新位置！
+ANCHOR_DOTS = genAnchors();
+trials = generateTrials();
+trialIdx = 0; answers = [];
+console.log('Dots trials:', trials.map(t => ({type:t.type, dur:t.duration?.toFixed(1)})));
+
+function runTrial() {
+  if (trialIdx >= trials.length) { showResult(); return; }
+  const trial = trials[trialIdx];
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('progress-label').textContent = `${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+
+  if (trial.duration === 0) {
+    document.getElementById('tip').innerHTML = '准备观察静止点阵...';
+    drawTestScene();
+    setTimeout(() => showTest(), 500);
+  } else {
+    document.getElementById('tip').innerHTML = '准备注视中心<strong>红色十字</strong>...';
+    drawBG(); drawDots(ADAPT_DOTS, CFG.dotColor); drawFixation();
+    setTimeout(() => startAdapt(trial), 600);
+  }
+}
+
+function startAdapt(trial) {
+  let elapsed = 0, lastTime = performance.now();
+  const animDots = ADAPT_DOTS.map(d => ({...d}));
+
+  document.getElementById('tip').innerHTML = '🔴 <strong>死盯中心十字！不要追视任何圆点！</strong>';
+
+  function anim(now) {
+    const dt = Math.min((now-lastTime)/1000, 0.1);
+    lastTime = now; elapsed += dt;
+    const dx = CFG.dotSpeed * dt;
+    animDots.forEach(d => {
+      d.x += dx;
+      if (d.x > W-MARGIN) d.x -= (W-MARGIN*2);
+      if (d.x < MARGIN) d.x += (W-MARGIN*2);
+    });
+    drawBG(); drawDots(animDots, CFG.dotColor); drawFixation();
+
+    if (elapsed < trial.duration) {
+      animId = requestAnimationFrame(anim);
+    } else {
+      drawBG(); drawFixation();
+      setTimeout(() => showTest(), CFG.blankMs);
+    }
+  }
+  animId = requestAnimationFrame(anim);
+}
+
+function showTest() {
+  drawTestScene(); // 全新点阵！
+  document.getElementById('tip').innerHTML = '全新点阵已静止。<strong>白点相对红点看起来在往哪漂移？</strong>';
+  trialStartTime = performance.now();
+
+  const labels = ['向左很强','向左中等','向左轻微','完全不动','向右轻微','向右中等','向右很强'];
+  const values = [-3,-2,-1,0,1,2,3];
+  document.getElementById('options').innerHTML = values.map((v,i) =>
+    `<button class="opt-btn" onclick="answer(${v})">${labels[i]}</button>`
+  ).join('');
+}
+
+function answer(score) {
+  answers.push({ trial: trials[trialIdx], score, rt: performance.now()-trialStartTime });
+  trialIdx++;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+  runTrial();
+}
+
+function showResult() {
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('tip').innerHTML = '验证完成';
+  document.getElementById('progress').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${trials.length}/${trials.length}`;
+
+  let total = 100;
+  const normal = answers.filter(a => a.trial.type === 'normal');
+  const catchTrial = answers.find(a => a.trial.type === 'catch');
+  let dirOk = 0;
+
+  normal.forEach(a => {
+    if (a.score < 0) dirOk++;
+    if (a.score > 0) total -= 14;
+    if (a.score === 0) total -= 8;
+  });
+  if (catchTrial) {
+    const abs = Math.abs(catchTrial.score);
+    if (abs >= 2) total -= 35; else if (abs >= 1) total -= 22;
+  }
+  const rts = answers.map(a => a.rt);
+  const rtVar = Math.max(...rts) - Math.min(...rts);
+  if (rtVar < 85) total -= 15;
+
+  total = Math.max(0, Math.min(100, Math.round(total)));
+  const passed = total >= 60;
+
+  const box = document.getElementById('result');
+  box.className = 'result-box ' + (passed ? 'pass' : 'fail');
+  document.getElementById('result-title').textContent = passed ? '✓ 验证通过' : '✗ 验证失败';
+  document.getElementById('result-desc').textContent = `得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent =
+    `方向正确: ${dirOk}/${normal.length}（适应向右→测试点应显向左漂移） | RT波动: ${Math.round(rtVar)}ms`;
+  console.log('Dots answers:', answers.map(a => ({score:a.score, rt:Math.round(a.rt)})));
+}
+
+function restart() {
+  document.getElementById('result').className = 'result-box';
+  document.getElementById('result').style.display = 'none';
+  ADAPT_DOTS = genDots(CFG.dotCount, 3.5, 3.0);
+  TEST_DOTS = genDots(CFG.dotCount, 3.5, 3.0);  // 全新测试点
+  ANCHOR_DOTS = genAnchors();
+  trials = generateTrials(); trialIdx = 0; answers = [];
+  document.getElementById('progress').style.width = '0%';
+  document.getElementById('progress-label').textContent = '0/4';
+  runTrial();
+}
+
+runTrial();
+</script>
+</body>
+</html>

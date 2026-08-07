@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pigeon Neck CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:560px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.retake-row{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.retake-btn{padding:6px 14px;border:1px solid #475569;border-radius:6px;background:#0f172a;color:#94a3b8;cursor:pointer;font-size:11px}
+.retake-btn:hover{border-color:#60a5fa;color:#e2e8f0}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.scoring-table{width:100%;margin:12px 0;border-collapse:collapse;font-size:11px}
+.scoring-table td,.scoring-table th{padding:5px 8px;border:1px solid #334155;text-align:center}
+.scoring-table th{background:#1a2230;color:#94a3b8;font-weight:600}
+.scoring-table .ok{color:#4ade80}.scoring-table .fail{color:#f87171}
+.feedback-section{margin-top:20px;padding:16px;background:#0f172a;border-radius:10px;display:none}
+.feedback-section h4{font-size:14px;margin-bottom:10px}
+.fb-item{margin-bottom:12px;padding:10px;background:#1a2230;border-radius:8px}
+.feedback-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;align-items:center}
+.feedback-row label{font-size:11px;color:#94a3b8;white-space:nowrap;min-width:55px}
+.radio-label{font-size:11px;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:2px}
+.radio-label input[type=radio]{accent-color:#60a5fa;cursor:pointer}
+.radio-hint{font-size:10px;color:#475569;margin-left:4px}
+.feedback-text{width:100%;padding:6px 8px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#94a3b8;font-size:11px;resize:vertical;min-height:36px;font-family:inherit}
+.submit-btn{padding:8px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;margin-top:8px}
+.submit-btn:hover{background:#1d4ed8}.thanks{color:#4ade80;font-size:12px;margin-top:6px;display:none}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🐦 Pigeon Neck 错觉</h2><p class="subtitle">鸽颈错觉 — 不盯着看时图案跳动，实际运动非常平滑</p>
+<div class="instruction" id="tip"><strong>不要盯着蓝色图案看！</strong>用余光感受——它们是在平滑移动还是在跳动？</div>
+<canvas id="c" width="480" height="320"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="retake-row" id="retake"></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p>
+<table class="scoring-table"><thead><tr><th>评分项</th><th>满分</th><th>得分</th><th>说明</th></tr></thead><tbody id="st"></tbody></table>
+<button class="restart-btn" onclick="rst()">重新验证</button></div>
+<div class="feedback-section" id="fb"><h4>📝 反馈 (全部选填)</h4>
+<div class="fb-item"><div class="feedback-row"><label>🖼️ 图案效果:</label>
+<label class="radio-label"><input type="radio" name="img" value="1">1</label><label class="radio-label"><input type="radio" name="img" value="2">2</label><label class="radio-label"><input type="radio" name="img" value="3">3</label><label class="radio-label"><input type="radio" name="img" value="4">4</label><label class="radio-label"><input type="radio" name="img" value="5">5</label><span class="radio-hint">1=完全看不出 5=效果极明显</span></div>
+<textarea class="feedback-text" placeholder="图案效果建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>🔘 选项设计:</label>
+<label class="radio-label"><input type="radio" name="opt" value="1">1</label><label class="radio-label"><input type="radio" name="opt" value="2">2</label><label class="radio-label"><input type="radio" name="opt" value="3">3</label><label class="radio-label"><input type="radio" name="opt" value="4">4</label><label class="radio-label"><input type="radio" name="opt" value="5">5</label><span class="radio-hint">1=完全不合理 5=非常合理</span></div>
+<textarea class="feedback-text" placeholder="选项设计建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>📏 评分标准:</label>
+<label class="radio-label"><input type="radio" name="score" value="1">1</label><label class="radio-label"><input type="radio" name="score" value="2">2</label><label class="radio-label"><input type="radio" name="score" value="3">3</label><label class="radio-label"><input type="radio" name="score" value="4">4</label><label class="radio-label"><input type="radio" name="score" value="5">5</label><span class="radio-hint">1=完全不合理 5=非常合理</span></div>
+<textarea class="feedback-text" placeholder="评分标准建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>🤖 AI 抗性:</label>
+<label class="radio-label"><input type="radio" name="ai" value="1">1</label><label class="radio-label"><input type="radio" name="ai" value="2">2</label><label class="radio-label"><input type="radio" name="ai" value="3">3</label><label class="radio-label"><input type="radio" name="ai" value="4">4</label><label class="radio-label"><input type="radio" name="ai" value="5">5</label><span class="radio-hint">1=极易攻破 5=极难攻破</span></div>
+<textarea class="feedback-text" placeholder="AI 攻破分析…"></textarea></div>
+<button class="submit-btn" onclick="submitFB()">提交反馈</button><span class="thanks" id="thx">✓ 感谢!</span></div></div>
+<script src="../../js/collector.js"></script>
+<script>
+// 精确复刻 mot-pigeonNeck: 黑白竖条纹背景 + 蓝色鸽子/蠕虫图案水平滚动
+// nStripes=64, stripeSize=viewWidth/nStripes/2, xOffset每帧+0.5
+// 不盯时图案显跳跃, 盯时运动平滑
+
+const c=document.getElementById('c'),x=c.getContext('2d'),W=480,H=320;
+const N_STRIPES=64,STRIPE=Math.round(W/N_STRIPES/2);
+let xOffset=0,delay=1;
+
+function drawGrating(){
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  x.fillStyle='#000';
+  for(let i=0;i<N_STRIPES;i++)x.fillRect(i*2*STRIPE,0,STRIPE,H);
+}
+function drawBlock(bx,by,w,h){
+  x.fillStyle='#00f';x.fillRect(bx*STRIPE,by*STRIPE,w*STRIPE,h||STRIPE+1);
+}
+function drawWorm(x0,y0){
+  let bx=((x0*STRIPE+xOffset)%W)/STRIPE;
+  drawBlock(bx,y0,15);drawBlock(bx,y0+1,15);
+}
+function drawPigeon(x0,y0){
+  let bx=((x0*STRIPE+xOffset)%W)/STRIPE;
+  drawBlock(bx+8,y0,4);for(let y=1;y<=5;y++)drawBlock(bx+8,y0+y,2);
+  for(let xx=0;xx<=8;xx+=2)for(let y=6;y<=7;y++)drawBlock(bx+xx,y0+y+xx,14-xx);
+  for(let y=0;y<=1;y++)drawBlock(bx+9,y0+16+y,8);
+  for(let y=0;y<=3;y++)drawBlock(bx+9,y0+18+y,6);
+}
+
+function draw(hasGrid,showPigeons,showWorms){
+  if(hasGrid)drawGrating();else{x.fillStyle='#fff';x.fillRect(0,0,W,H)}
+  if(showWorms){drawWorm(30,5);drawWorm(95,7);drawWorm(15,47);drawWorm(70,50)}
+  if(showPigeons){drawPigeon(10,15);drawPigeon(41,25);drawPigeon(70,15);drawPigeon(101,25)}
+}
+
+let trials,tIdx,answers,animId,tStart;
+function gen(){let t=[];
+t.push({type:'normal',grid:true,pigeons:true,worms:true,delay:1,exp:'jerky'});
+t.push({type:'normal',grid:true,pigeons:true,worms:true,delay:3,exp:'jerky'});
+t.push({type:'catch',ct:'noGrid',grid:false,pigeons:true,worms:true,delay:1,exp:'smooth'});
+t.push({type:'normal',grid:true,pigeons:true,worms:false,delay:1,exp:'jerky'});
+return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+document.getElementById('retake').innerHTML=trials.map((_,i)=>`<button class="retake-btn" onclick="retry(${i})">第${i+1}题</button>`).join('');
+xOffset=0;delay=tr.delay;draw(tr.grid,tr.pigeons,tr.worms);
+document.getElementById('tip').innerHTML=tr.grid?'<strong>不要盯蓝色图案！</strong>用余光感受其运动…':'无条纹背景。<strong>图案运动感觉如何？</strong>';
+setTimeout(()=>startAnim(tr),400)}
+
+function startAnim(tr){let elapsed=0,lt=performance.now(),fc=0;
+function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;fc++;
+  if(fc>=tr.delay){xOffset=(xOffset+0.5)%W;fc=0}
+  draw(tr.grid,tr.pigeons,tr.worms);
+  if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ(tr)}
+animId=requestAnimationFrame(anim)}
+
+function showQ(tr){tStart=performance.now();
+document.getElementById('tip').innerHTML='<strong>蓝色图案的运动感觉是？</strong>';
+document.getElementById('op').innerHTML=['明显跳动/不连贯','有些跳动感','不确定','比较平滑','非常平滑流畅'].map((l,i)=>`<button class="opt-btn" onclick="ans(${2-i})">${l}</button>`).join('')}
+
+function ans(s){let rt=performance.now()-tStart;answers.push({trial:trials[tIdx],score:s,rt});DataCollector.trials.push({answer:s,expected:trials[tIdx].expected||'',rt,trialType:trials[tIdx].type||'normal'});tIdx++;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function retry(i){tIdx=i;document.getElementById('pg').style.width=(i/trials.length*100)+'%';answers=answers.slice(0,i);run()}
+
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('retake').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let norm=answers.filter(a=>a.trial.type==='normal');let noG=answers.find(a=>a.trial.ct==='noGrid');
+let jerkOk=norm.filter(a=>a.score<=0).length;
+let noGOk=noG&&noG.score>0;
+let total=Math.round(jerkOk/norm.length*35+(noGOk?35:0)+30);
+total=Math.max(0,Math.min(100,total));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
+document.getElementById('st').innerHTML=`
+<tr><td>跳动感知</td><td>35</td><td class="${jerkOk>=2?'ok':'fail'}">${Math.round(jerkOk/norm.length*35)}</td><td>有栅栏时应感知跳动 (${jerkOk}/${norm.length})</td></tr>
+<tr><td>无栅栏对照</td><td>35</td><td class="${noGOk?'ok':'fail'}">${noGOk?35:0}</td><td>无栅栏应感知平滑</td></tr>
+<tr><td>基础分</td><td>30</td><td>30</td><td>完成全部试次</td></tr>`;box.style.display='block';document.getElementById('fb').style.display='block';DataCollector.submitResult('pigeon-neck',total,total>=60)}
+function rst(){document.getElementById('re').style.display='none';document.getElementById('fb').style.display='none';trials=gen();tIdx=0;answers=[];DataCollector.trials=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+
+function submitFB(){
+  let getRadio=name=>{let r=document.querySelector(`input[name="${name}"]:checked`);return r?parseInt(r.value):0};
+  let getText=i=>document.querySelectorAll('.feedback-text')[i]?.value||'';
+  let fb={img:{rating:getRadio('img'),comment:getText(0)},opt:{rating:getRadio('opt'),comment:getText(1)},score:{rating:getRadio('score'),comment:getText(2)},ai:{rating:getRadio('ai'),comment:getText(3)}};
+  DataCollector.submitFeedback('pigeon-neck',fb);
+  document.querySelectorAll('.feedback-text').forEach(t=>t.value='');
+  document.querySelectorAll('input[type=radio]').forEach(r=>r.checked=false);
+  document.getElementById('thx').style.display='inline';setTimeout(()=>document.getElementById('thx').style.display='none',3000)}
+run();</script></body></html>

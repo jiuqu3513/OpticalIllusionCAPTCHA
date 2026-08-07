@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stepping Feet (Circular) CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 560px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 10px; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<a href="../../../" class="back">← 首页</a>
+<div class="container">
+  <h2>👣 Stepping Feet (圆形)</h2>
+  <p class="subtitle">Circular — 放射星形背景 + 旋转弧形色块，精确复刻 mot-feetCirc</p>
+  <div class="instruction" id="tip">
+    观察黄蓝弧形色块绕中心旋转。<strong>它们的转速始终恒定</strong>——但星形背景让它们看起来在"跳"。
+  </div>
+  <canvas id="canvas" width="440" height="440"></canvas>
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+  <div class="options" id="options"></div>
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3><p id="result-desc"></p><div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+<script>
+// 精确复刻 mot-feetCirc OTView.j
+// nWedges=40, bg1=0.15 bg2=0.99, ftw=22, r0=240, speed=10
+// foot1=yellow, foot2=blue, center grey circle r=100
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2;
+const N_WEDGES = 40, FTW = 22, R0 = 240, SPEED = 10/60; // rad/s
+const BG1 = '#262626', BG2 = '#fcfcfc', FOOT1 = '#ffff00', FOOT2 = '#0000ff';
+
+let trials, trialIdx, answers, animId, trialStartTime, angle = 0;
+
+function draw(hasStar, rotAngle) {
+  ctx.fillStyle = hasStar ? BG1 : '#cccccc';
+  ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.translate(CX, CY);
+
+  if (hasStar) {
+    const t = 2*Math.PI/N_WEDGES;
+    ctx.fillStyle = BG2;
+    for (let i=0; i<N_WEDGES; i++) {
+      const a0=t*i, a1=t*(i+0.5);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(500*Math.cos(a0),500*Math.sin(a0));
+      ctx.lineTo(500*Math.cos(a1),500*Math.sin(a1));
+      ctx.fill();
+    }
+  }
+
+  ctx.rotate(rotAngle);
+  const alfa = Math.PI/N_WEDGES;
+  // 两个弧形"脚"
+  for (let i=0; i<2; i++) {
+    const r = R0 + i*FTW*2;
+    ctx.fillStyle = i===0 ? FOOT1 : FOOT2;
+    ctx.beginPath();
+    ctx.arc(0,0,r+FTW,-alfa,alfa);
+    ctx.arc(0,0,r,alfa,-alfa,true);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke();
+  }
+
+  // 中心灰圆
+  ctx.fillStyle='#cccccc';ctx.beginPath();ctx.arc(0,0,100,0,2*Math.PI);ctx.fill();
+  // 中心红点
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(0,0,6,0,2*Math.PI);ctx.fill();
+  ctx.restore();
+}
+
+function genTrials(){
+  const t=[];
+  for(let i=0;i<2;i++)t.push({type:'normal',star:true,expected:'jerky'});
+  t.push({type:'catch',ct:'noStar',star:false,expected:'smooth'});
+  t.push({type:'catch',ct:'fastSwitch',star:true,fast:true,expected:'jerky'});
+  return t.sort(()=>Math.random()-0.5);
+}
+trials=genTrials();trialIdx=0;answers=[];
+console.log('SF-circ trials:',trials.map(t=>({type:t.type,ct:t.ct})));
+
+function run(){
+  if(trialIdx>=trials.length){showResult();return;}
+  document.getElementById('options').innerHTML='';
+  document.getElementById('progress-label').textContent=`${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';
+  document.getElementById('tip').innerHTML='观察黄蓝弧形。<strong>它们的旋转是跳跃的还是流畅的？</strong>';
+  const trial=trials[trialIdx];angle=0;
+  draw(trial.star,0);
+  setTimeout(()=>startAnim(trial),500);
+}
+
+function startAnim(trial){
+  let elapsed=0,lastTime=performance.now(),switchTime=0,dir=1;
+  function anim(now){
+    const dt=Math.min((now-lastTime)/1000,0.1);lastTime=now;elapsed+=dt;
+    angle+=SPEED*dt*dir;
+    if(trial.fast&&(now-switchTime>700)){dir*=-1;switchTime=now;}
+    draw(trial.star,angle);
+    if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ();
+  }
+  animId=requestAnimationFrame(anim);
+}
+
+function showQ(){
+  document.getElementById('tip').innerHTML='<strong>弧形色块的运动感觉是？</strong>';
+  trialStartTime=performance.now();
+  document.getElementById('options').innerHTML=['明显跳跃/步进','有些跳跃感','不确定','比较流畅','完全流畅匀速'].map((l,i)=>
+    `<button class="opt-btn" onclick="answer(${i-2})">${l}</button>`).join('');
+}
+
+function answer(s){answers.push({trial:trials[trialIdx],score:s,rt:performance.now()-trialStartTime});trialIdx++;document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';run();}
+
+function showResult(){
+  document.getElementById('options').innerHTML='';document.getElementById('tip').innerHTML='验证完成';
+  document.getElementById('progress').style.width='100%';document.getElementById('progress-label').textContent=`${trials.length}/${trials.length}`;
+  let total=100;
+  const norm=answers.filter(a=>a.trial.type==='normal');
+  const noS=answers.find(a=>a.trial.ct==='noStar');
+  norm.forEach(a=>{if(a.score<0){}else if(a.score>0)total-=16;else total-=6;});
+  if(noS&&noS.score<0)total-=30;
+  if(answers.find(a=>a.trial.ct==='fastSwitch')?.score>=0)total-=15;
+  total=Math.max(0,Math.min(100,Math.round(total)));
+  const box=document.getElementById('result');
+  box.className='result-box '+(total>=60?'pass':'fail');
+  document.getElementById('result-title').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';
+  document.getElementById('result-desc').textContent=`得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent=`无星形对照: ${noS?.score>0?'✓流畅':'✗'}`;
+  box.style.display='block';
+}
+function restart(){document.getElementById('result').style.display='none';trials=genTrials();trialIdx=0;answers=[];document.getElementById('progress').style.width='0%';document.getElementById('progress-label').textContent='0/4';run();}
+run();
+</script>
+</body>
+</html>

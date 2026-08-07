@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>瀑布错觉 CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 520px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 10px; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<a href="../../" class="back">← 首页</a>
+
+<div class="container">
+  <h2>🌊 瀑布错觉验证</h2>
+  <p class="subtitle">Waterfall Illusion — 适应条纹运动后，在静止噪声纹理上看到反向运动</p>
+
+  <div class="instruction" id="tip">
+    即将开始验证。请<strong>死死盯住中心的红色十字</strong>，不要追视条纹运动。
+  </div>
+
+  <canvas id="canvas" width="480" height="320"></canvas>
+
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+
+  <div class="options" id="options"></div>
+
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3>
+    <p id="result-desc"></p>
+    <div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 关键设计：适应刺激 ≠ 测试刺激
+//   适应：高对比度横条纹向下运动
+//   测试：随机噪声纹理（无方向特征）
+//   后效：噪声纹理看起来向上漂移
+//   参考：mot-adapt 测试在佛像照片上（完全不同纹理）
+// ============================================================
+
+const CFG = {
+  adaptationSec: 8.0,          // ⬆ 加长适应
+  blankMs: 300,
+  stripeWidth: 16,             // ⬇ 更细的条纹
+  speed: 120,                  // ⬆ 更快
+  fixationR: 16,
+};
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2;
+
+let trials, trialIdx, answers, animId, offsetY, trialStartTime;
+let NOISE_TEXTURE = null;  // 预渲染的噪声纹理（测试用，无方向特征）
+
+// ============ 预渲染噪声纹理 ============
+function createNoiseTexture() {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const cx = c.getContext('2d');
+  const img = cx.createImageData(W, H);
+
+  // 生成空间上平滑变化的随机纹理（类 1/f 噪声）
+  // 方法：多层随机方块叠加，模拟多尺度纹理
+  const scales = [2, 4, 8, 16, 32];
+  const tempData = new Float32Array(W * H);
+
+  for (const scale of scales) {
+    const gw = Math.ceil(W / scale);
+    const gh = Math.ceil(H / scale);
+    const grid = new Float32Array(gw * gh);
+    for (let i = 0; i < gw * gh; i++) {
+      grid[i] = (Math.random() - 0.5) * 2.0 * (scale / 8);
+    }
+    // 双线性插值到全分辨率
+    for (let y = 0; y < H; y++) {
+      const gy = y / scale;
+      const gy0 = Math.floor(gy), gy1 = Math.min(gy0 + 1, gh - 1);
+      const fy = gy - gy0;
+      for (let x = 0; x < W; x++) {
+        const gx = x / scale;
+        const gx0 = Math.floor(gx), gx1 = Math.min(gx0 + 1, gw - 1);
+        const fx = gx - gx0;
+        const v00 = grid[gy0 * gw + gx0], v10 = grid[gy0 * gw + gx1];
+        const v01 = grid[gy1 * gw + gx0], v11 = grid[gy1 * gw + gx1];
+        tempData[y * W + x] += v00*(1-fx)*(1-fy) + v10*fx*(1-fy) + v01*(1-fx)*fy + v11*fx*fy;
+      }
+    }
+  }
+
+  // 映射到 0-255
+  for (let i = 0; i < W * H; i++) {
+    const v = Math.max(-1, Math.min(1, tempData[i])) * 0.5 + 0.5;
+    const val = Math.round(100 + v * 110); // 中灰范围 100~210
+    const idx = i * 4;
+    img.data[idx] = img.data[idx+1] = img.data[idx+2] = val;
+    img.data[idx+3] = 255;
+  }
+
+  cx.putImageData(img, 0, 0);
+  return c;
+}
+
+// ============ 注视十字 ============
+function drawFixation() {
+  const sz = CFG.fixationR;
+  ctx.strokeStyle = '#ef4444';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(CX-sz, CY); ctx.lineTo(CX+sz, CY);
+  ctx.moveTo(CX, CY-sz); ctx.lineTo(CX, CY+sz);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(239,68,68,0.4)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CX, CY, sz+3, 0, Math.PI*2); ctx.stroke();
+}
+
+// ============ 画条纹（适应阶段） ============
+function drawStripes(phaseY) {
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, W, H);
+  const sw = CFG.stripeWidth;
+  ctx.fillStyle = '#fff';
+  const startY = ((phaseY % (sw*2)) + sw*2) % (sw*2);
+  for (let y = startY - sw*2; y < H + sw*2; y += sw*2) {
+    ctx.fillRect(0, y, W, sw);
+  }
+}
+
+// ============ 测试场景：噪声纹理 + 注视十字 ============
+function drawTestScene() {
+  // 画噪声纹理（完全不同於适应条纹！）
+  ctx.drawImage(NOISE_TEXTURE, 0, 0);
+  // 叠加半透明参照线（水平方向，帮助判断垂直运动）
+  ctx.strokeStyle = 'rgba(239,68,68,0.35)';
+  ctx.lineWidth = 1;
+  const nLines = 5;
+  for (let i = 0; i < nLines; i++) {
+    const y = H * (i + 0.5) / nLines;
+    ctx.setLineDash([8, 20]);
+    ctx.beginPath();
+    ctx.moveTo(30, y); ctx.lineTo(W-30, y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  drawFixation();
+}
+
+// ============ TRIALS ============
+function generateTrials() {
+  const t = [];
+  for (let i = 0; i < 3; i++) {
+    t.push({
+      type: 'normal', direction: 'down',
+      duration: CFG.adaptationSec + (Math.random()-0.5)*1.5,
+      expectedSign: -1, // 适应向下→后效向上(负)
+    });
+  }
+  t.push({ type: 'catch', catchType: 'zero', direction: 'none', duration: 0, expectedSign: 0 });
+  return t.sort(() => Math.random()-0.5);
+}
+
+// ============ FLOW ============
+NOISE_TEXTURE = createNoiseTexture();
+trials = generateTrials();
+trialIdx = 0; answers = [];
+console.log('Waterfall trials:', trials.map(t => ({type:t.type, dur:t.duration?.toFixed(1)})));
+
+function runTrial() {
+  if (trialIdx >= trials.length) { showResult(); return; }
+  const trial = trials[trialIdx];
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('progress-label').textContent = `${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+
+  if (trial.duration === 0) {
+    document.getElementById('tip').innerHTML = '准备观察噪声纹理...';
+    drawTestScene();
+    setTimeout(() => showTest(), 500);
+  } else {
+    document.getElementById('tip').innerHTML = '准备注视中心<strong>红色十字</strong>...';
+    drawStripes(0); drawFixation();
+    setTimeout(() => startAdapt(trial), 600);
+  }
+}
+
+function startAdapt(trial) {
+  let elapsed = 0, lastTime = performance.now();
+  offsetY = 0;
+  const dirSign = trial.direction === 'down' ? 1 : -1;
+  document.getElementById('tip').innerHTML = '🔴 <strong>死盯中心十字！不要追视条纹！</strong>';
+
+  function anim(now) {
+    const dt = Math.min((now-lastTime)/1000, 0.1);
+    lastTime = now; elapsed += dt;
+    offsetY += CFG.speed * dt * dirSign;
+    drawStripes(offsetY); drawFixation();
+
+    if (elapsed < trial.duration) {
+      animId = requestAnimationFrame(anim);
+    } else {
+      // 短暂空白过渡
+      ctx.fillStyle = '#808080'; ctx.fillRect(0,0,W,H); drawFixation();
+      setTimeout(() => showTest(), CFG.blankMs);
+    }
+  }
+  animId = requestAnimationFrame(anim);
+}
+
+function showTest() {
+  drawTestScene();
+  document.getElementById('tip').innerHTML = '现在看噪声纹理。<strong>纹理看起来在往哪个方向漂移？</strong>';
+  trialStartTime = performance.now();
+
+  const labels = ['向上很强','向上中等','向上轻微','完全不动','向下轻微','向下中等','向下很强'];
+  const values = [-3,-2,-1,0,1,2,3];
+  document.getElementById('options').innerHTML = values.map((v,i) =>
+    `<button class="opt-btn" onclick="answer(${v})">${labels[i]}</button>`
+  ).join('');
+}
+
+function answer(score) {
+  answers.push({ trial: trials[trialIdx], score, rt: performance.now()-trialStartTime });
+  trialIdx++;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+  runTrial();
+}
+
+function showResult() {
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('tip').innerHTML = '验证完成';
+  document.getElementById('progress').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${trials.length}/${trials.length}`;
+
+  let total = 100;
+  const normal = answers.filter(a => a.trial.type === 'normal');
+  const catchTrial = answers.find(a => a.trial.type === 'catch');
+  let dirOk = 0;
+
+  normal.forEach(a => {
+    if (a.score < 0) dirOk++;
+    if (a.score > 0) total -= 14;
+    if (a.score === 0) total -= 8;
+  });
+  if (catchTrial) {
+    const abs = Math.abs(catchTrial.score);
+    if (abs >= 2) total -= 35;
+    else if (abs >= 1) total -= 22;
+  }
+  const rts = answers.map(a => a.rt);
+  const rtVar = Math.max(...rts) - Math.min(...rts);
+  if (rtVar < 90) total -= 15;
+
+  total = Math.max(0, Math.min(100, Math.round(total)));
+  const passed = total >= 60;
+
+  const box = document.getElementById('result');
+  box.className = 'result-box ' + (passed ? 'pass' : 'fail');
+  document.getElementById('result-title').textContent = passed ? '✓ 验证通过' : '✗ 验证失败';
+  document.getElementById('result-desc').textContent = `得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent =
+    `方向正确: ${dirOk}/${normal.length}（适应向下→噪声应显向上漂移） | RT波动: ${Math.round(rtVar)}ms`;
+  console.log('Waterfall answers:', answers.map(a => ({score:a.score, rt:Math.round(a.rt)})));
+}
+
+function restart() {
+  document.getElementById('result').className = 'result-box';
+  document.getElementById('result').style.display = 'none';
+  NOISE_TEXTURE = createNoiseTexture(); // 每次新纹理
+  trials = generateTrials(); trialIdx = 0; answers = [];
+  document.getElementById('progress').style.width = '0%';
+  document.getElementById('progress-label').textContent = '0/4';
+  runTrial();
+}
+
+runTrial();
+</script>
+</body>
+</html>

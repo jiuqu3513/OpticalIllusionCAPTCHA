@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotating Snakes (Ad Lib) CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 540px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; border-radius: 50%; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; } .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<a href="../../../" class="back">← 首页</a>
+<div class="container">
+  <h2>🐍 Snake Ad Lib</h2>
+  <p class="subtitle">Star Polygon Variant — 星形多边形蛇盘，精确复刻 mot-snakeAdLib</p>
+  <div class="instruction" id="tip">
+    <strong>不要盯着中心！</strong>用余光感受星形"蛇"的旋转。
+  </div>
+  <canvas id="canvas" width="440" height="440"></canvas>
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+  <div class="options" id="options"></div>
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3><p id="result-desc"></p><div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+<script>
+// 精确复刻 mot-snakeAdLib OTView.j
+// nVertices=18, widthRatio=33, nLanes=5
+// 4色: 深蓝(#00000d) → color1(绿) → 浅黄(#fffff2) → color2(紫)
+// Star-shaped rings, deltaRadius=radius/6
+
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const W=canvas.width,H=canvas.height,CX=W/2,CY=H/2;
+const N_VERTICES=18,WIDTH_RATIO=33,N_LANES=5;
+const C0='#00000d'; // deep blue-black
+const C1='#008000'; // green
+const C2='#fffff2'; // off-white
+const C3='#cc00cc'; // purple
+
+let trials,trialIdx,answers,animId,trialStartTime;
+let SNAKE_IMG=null,CONTROL_IMG=null;
+
+// 画星形多边形环
+function drawStarRing(cx,cy,innerR,outerR,nPts,c0,c1,c2,c3,clockwise){
+  const deltaR=outerR-innerR;
+  const fullSpace=outerR/N_LANES;
+  const space1=fullSpace/2*WIDTH_RATIO/100;
+  const space2=fullSpace/2-space1;
+  let r=outerR;
+
+  // 4层颜色（从外到内）
+  const layers=clockwise?
+    [{c:c0,w:deltaR},{c:c1,w:space1},{c:c2,w:deltaR},{c:c3,w:space2}] :
+    [{c:c0,w:deltaR},{c:c3,w:space2},{c:c2,w:deltaR},{c:c1,w:space1}];
+
+  r=outerR;
+  for(const layer of layers){
+    const ri=r-layer.w;
+    ctx.fillStyle=layer.c;ctx.strokeStyle=layer.c;ctx.lineWidth=1;
+    ctx.beginPath();
+    for(let i=0;i<nPts;i++){
+      const a0=2*Math.PI*i/nPts-Math.PI/2;
+      const a1=a0+Math.PI/nPts;
+      const x0=cx+r*Math.cos(a0),y0=cy+r*Math.sin(a0);
+      const x1=cx+ri*Math.cos(a1),y1=cy+ri*Math.sin(a1);
+      if(i===0)ctx.moveTo(x0,y0);else ctx.lineTo(x0,y0);
+      ctx.lineTo(x1,y1);
+    }
+    ctx.closePath();ctx.fill();
+    r=ri;
+  }
+  return r;
+}
+
+function renderAdLib(clockwise){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const oc=c.getContext('2d');
+  oc.fillStyle='#cccccc';oc.fillRect(0,0,W,H);
+  const maxR=Math.min(CX,CY)-10;
+  const deltaR=maxR/6;
+  let r=maxR;
+  for(let lane=0;lane<N_LANES;lane++){
+    const ri=r-deltaR;
+    const seq=clockwise?[C0,C1,C2,C3]:[C0,C3,C2,C1];
+    // 每个lane画4层
+    const fullSpace=r/N_LANES;
+    const space1=fullSpace/2*WIDTH_RATIO/100;
+    const space2=fullSpace/2-space1;
+    let lr=r;
+    const widths=[deltaR,space1,deltaR,space2];
+    for(let s=0;s<4;s++){
+      const lri=lr-widths[s];
+      oc.fillStyle=seq[s];
+      oc.beginPath();
+      for(let i=0;i<N_VERTICES;i++){
+        const a0=2*Math.PI*i/N_VERTICES-Math.PI/2;
+        const a1=a0+Math.PI/N_VERTICES;
+        const x0=CX+lr*Math.cos(a0),y0=CY+lr*Math.sin(a0);
+        const x1=CX+lri*Math.cos(a1),y1=CY+lri*Math.sin(a1);
+        if(i===0)oc.moveTo(x0,y0);else oc.lineTo(x0,y0);
+        oc.lineTo(x1,y1);
+      }
+      oc.closePath();oc.fill();
+      lr=lri;
+    }
+    r=lri;
+  }
+  return c;
+}
+
+function renderAdLibControl(){
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const oc=c.getContext('2d');
+  oc.fillStyle='#cccccc';oc.fillRect(0,0,W,H);
+  const maxR=Math.min(CX,CY)-10;
+  const deltaR=maxR/6;
+  let r=maxR;
+  for(let lane=0;lane<N_LANES;lane++){
+    const ri=r-deltaR;
+    const fullSpace=r/N_LANES;
+    const space1=fullSpace/2*WIDTH_RATIO/100;
+    const space2=fullSpace/2-space1;
+    let lr=r;
+    const widths=[deltaR,space1,deltaR,space2];
+    for(let s=0;s<4;s++){
+      const lri=lr-widths[s];
+      oc.fillStyle=['#333','#888','#333','#888'][s]; // 无漂移色彩
+      oc.beginPath();
+      for(let i=0;i<N_VERTICES;i++){
+        const a0=2*Math.PI*i/N_VERTICES-Math.PI/2;
+        const a1=a0+Math.PI/N_VERTICES;
+        oc.moveTo(CX+lr*Math.cos(a0),CY+lr*Math.sin(a0));
+        oc.lineTo(CX+lri*Math.cos(a1),CY+lri*Math.sin(a1));
+      }
+      oc.closePath();oc.fill();
+      lr=lri;
+    }
+    r=lri;
+  }
+  return c;
+}
+
+SNAKE_IMG=renderAdLib(true);CONTROL_IMG=renderAdLibControl();
+
+function genTrials(){
+  const t=[];
+  t.push({type:'normal',img:SNAKE_IMG,expected:'rotating'});
+  t.push({type:'normal',img:renderAdLib(false),expected:'rotating'});
+  t.push({type:'catch',ct:'control',img:CONTROL_IMG,expected:'static'});
+  t.push({type:'catch',ct:'animated',img:SNAKE_IMG,anim:true,expected:'rotating'});
+  return t.sort(()=>Math.random()-0.5);
+}
+trials=genTrials();trialIdx=0;answers=[];
+
+function run(){
+  if(trialIdx>=trials.length){showResult();return;}
+  document.getElementById('options').innerHTML='';
+  document.getElementById('progress-label').textContent=`${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';
+  const trial=trials[trialIdx];
+  if(trial.anim)startAnim(trial);else showStatic(trial);
+}
+
+function showStatic(trial){
+  ctx.drawImage(trial.img,0,0);
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(CX,CY,5,0,2*Math.PI);ctx.fill();
+  document.getElementById('tip').innerHTML='<strong>不要盯中心！</strong>用余光感受星形图案的旋转。';
+  trialStartTime=performance.now();
+  setTimeout(()=>showQ(),3000);
+}
+
+function startAnim(trial){
+  let angle=0,elapsed=0,lastTime=performance.now();
+  function anim(now){
+    const dt=Math.min((now-lastTime)/1000,0.1);lastTime=now;elapsed+=dt;
+    angle+=20*dt;ctx.fillStyle='#cccccc';ctx.fillRect(0,0,W,H);
+    ctx.save();ctx.translate(CX,CY);ctx.rotate(angle*Math.PI/180);
+    ctx.drawImage(trial.img,-W/2,-H/2);ctx.restore();
+    if(elapsed<3.0)animId=requestAnimationFrame(anim);else{ctx.drawImage(trial.img,0,0);showQ();}
+  }
+  animId=requestAnimationFrame(anim);
+}
+
+function showQ(){
+  document.getElementById('tip').innerHTML='<strong>星形图案在旋转吗？</strong>';
+  trialStartTime=performance.now();
+  document.getElementById('options').innerHTML=['明显在旋转','有些旋转感','不确定','基本静止','完全静止'].map((l,i)=>
+    `<button class="opt-btn" onclick="answer(${2-i})">${l}</button>`).join('');
+}
+
+function answer(s){answers.push({trial:trials[trialIdx],score:s,rt:performance.now()-trialStartTime});trialIdx++;document.getElementById('progress').style.width=(trialIdx/trials.length*100)+'%';run();}
+
+function showResult(){
+  document.getElementById('options').innerHTML='';document.getElementById('tip').innerHTML='验证完成';
+  document.getElementById('progress').style.width='100%';document.getElementById('progress-label').textContent=`${trials.length}/${trials.length}`;
+  let total=100;
+  const norm=answers.filter(a=>a.trial.type==='normal');
+  const ctrl=answers.find(a=>a.trial.ct==='control');
+  const anim=answers.find(a=>a.trial.ct==='animated');
+  norm.forEach(a=>{if(a.score>0){}else total-=18;});
+  if(ctrl&&ctrl.score>0)total-=30;
+  if(anim&&anim.score<2)total-=22;
+  total=Math.max(0,Math.min(100,Math.round(total)));
+  const box=document.getElementById('result');
+  box.className='result-box '+(total>=60?'pass':'fail');
+  document.getElementById('result-title').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';
+  document.getElementById('result-desc').textContent=`得分: ${total}/100 (阈值: 60)`;
+  box.style.display='block';
+}
+function restart(){document.getElementById('result').style.display='none';trials=genTrials();trialIdx=0;answers=[];document.getElementById('progress').style.width='0%';document.getElementById('progress-label').textContent='0/4';run();}
+run();
+</script>
+</body>
+</html>

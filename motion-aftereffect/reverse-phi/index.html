@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>反向 Phi 运动 CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 540px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 12px; }
+  .warning { text-align: center; font-size: 11px; color: #f59e0b; margin-bottom: 16px; padding: 6px 12px; background: #451a03; border-radius: 6px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  .img-container { text-align: center; margin-bottom: 0; border-radius: 10px; overflow: hidden; background: #000; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+  .img-container img { display: block; max-width: 100%; height: auto; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<a href="../../" class="back">← 首页</a>
+
+<div class="container">
+  <h2>🔄 反向 Phi 运动验证</h2>
+  <p class="subtitle">Reverse Phi Motion — 四冲程运动错觉，基于官网雪景原图</p>
+  <p class="warning">⚠️ 含闪烁画面。光敏性癫痫者请勿使用。</p>
+
+  <div class="instruction" id="tip">
+    加载中…
+  </div>
+
+  <div class="img-container" id="display">
+    <img id="frame-img" src="" alt="loading" style="display:none;">
+  </div>
+
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/5</div>
+  </div>
+
+  <div class="options" id="options"></div>
+
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3>
+    <p id="result-desc"></p>
+    <div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 反向 Phi 运动 (Reverse Phi Motion) — 四冲程版本
+//
+// 图片来源: Michael Bach mot-reversePhi (snowb/1~4.jpg)
+//   帧1: 原始 t₀      帧2: 原始 t₀+Δt（右移）
+//   帧3: 帧1负片      帧4: 帧2负片
+//
+// 核心机制:
+//   过渡 1→2: 右移 + 同对比度  → 右向运动信号
+//   过渡 2→3: 左移 + 对比度反转 → 右向运动信号！（反向phi）
+//   过渡 3→4: 右移 + 同对比度  → 右向运动信号
+//   过渡 4→1: 左移 + 对比度反转 → 右向运动信号！
+//   → 所有过渡都被感知为右向 = 连续右向运动
+//
+//   逆序播放 (4→3→2→1): 所有过渡被感知为左向 = 连续左向运动
+//
+// 帧率参数:
+//   R=5 (83ms/帧): 强反向phi，运动感流畅
+//   R=1 (17ms/帧): flicker融合，方向混乱
+//   R=12 (200ms/帧): 表观运动断裂，能看清每帧
+//
+// 抗 AI 原理:
+//   AI 看单帧: 同4张图，正序vs逆序只是排列不同
+//   但人类在 R=5 时: 正序→右移感知，逆序→左移感知
+//   AI 无法"感受"时间滤波器的输出符号
+// ============================================================
+
+const CFG = {
+  animDuration: 3.0,  // 每轮动画秒数
+};
+
+const img = document.getElementById('frame-img');
+const display = document.getElementById('display');
+
+let trials, trialIdx, answers, animId, trialStartTime;
+let IMAGES = [];       // 4张预加载的图片
+let imagesLoaded = false;
+
+// ============ 加载图片 ============
+function loadImages() {
+  return new Promise((resolve) => {
+    let loaded = 0;
+    for (let i = 1; i <= 4; i++) {
+      const im = new Image();
+      im.onload = () => { loaded++; if (loaded === 4) resolve(); };
+      im.onerror = () => { loaded++; if (loaded === 4) resolve(); };
+      im.src = `snowb/${i}.jpg`;
+      IMAGES.push(im);
+    }
+  });
+}
+
+// ============ TRIAL 生成 ============
+function generateTrials() {
+  const t = [];
+
+  // 3 轮反向phi（正序播放，流畅右移感）
+  const normalRates = [5, 4, 6]; // 67-100ms/帧
+  normalRates.sort(() => Math.random()-0.5);
+  normalRates.forEach(r => {
+    t.push({
+      type: 'normal', rateR: r,
+      rateMs: Math.round(r * 1000/60),
+      order: [0,1,2,3], // 正序: 1→2→3→4
+      expectedSign: 1,  // 感知右移(正)
+      desc: `正序 ${Math.round(r*1000/60)}ms/帧`,
+    });
+  });
+
+  // 1 轮逆序播放 (catch): 帧序反转 → 感知左移
+  t.push({
+    type: 'catch', catchType: 'reverse_order', rateR: 5,
+    rateMs: 83,
+    order: [3,2,1,0], // 逆序: 4→3→2→1
+    expectedSign: -1,  // 感知左移(负)！
+    desc: '逆序 83ms/帧',
+  });
+
+  // 1 轮超慢速 (catch): 断裂，应看不清方向
+  t.push({
+    type: 'catch', catchType: 'broken', rateR: 12,
+    rateMs: 200,
+    order: [0,1,2,3],
+    expectedSign: 999, // 特殊：预期"不动"
+    desc: '正序 200ms/帧',
+  });
+
+  return t.sort(() => Math.random()-0.5);
+}
+
+// ============ 播放动画 ============
+function playAnimation(trial, onDone) {
+  const rateR = trial.rateR;
+  const order = trial.order;
+  let frameCount = 0;
+  let orderIdx = 0;
+  let elapsed = 0;
+  let lastTime = performance.now();
+
+  img.style.display = 'block';
+  img.src = IMAGES[order[0]].src;
+  display.style.background = '#000';
+
+  setTimeout(() => {
+    lastTime = performance.now();
+    document.getElementById('tip').innerHTML =
+      `🔴 <strong>注视画面中央！</strong>判断运动方向 (${trial.desc})`;
+
+    function anim(now) {
+      const dt = (now - lastTime)/1000;
+      lastTime = now;
+      elapsed += dt;
+      frameCount++;
+
+      if (frameCount >= rateR) {
+        frameCount = 0;
+        orderIdx = (orderIdx + 1) % 4;
+        img.src = IMAGES[order[orderIdx]].src;
+      }
+
+      if (elapsed < CFG.animDuration) {
+        animId = requestAnimationFrame(anim);
+      } else {
+        onDone();
+      }
+    }
+    animId = requestAnimationFrame(anim);
+  }, 400);
+}
+
+// ============ FLOW ============
+async function init() {
+  document.getElementById('tip').innerHTML = '加载图片中…';
+  await loadImages();
+  imagesLoaded = true;
+  document.getElementById('tip').innerHTML = '即将开始验证。请<strong>注视画面中央</strong>，判断运动方向。';
+  trials = generateTrials();
+  trialIdx = 0; answers = [];
+  console.log('Reverse Phi trials:', trials.map(t => ({
+    type:t.type, ct:t.catchType, order:t.order, R:t.rateR, ms:t.rateMs, exp:t.expectedSign
+  })));
+  setTimeout(() => runTrial(), 800);
+}
+
+function runTrial() {
+  if (trialIdx >= trials.length) { showResult(); return; }
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('progress-label').textContent = `${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+
+  const trial = trials[trialIdx];
+  img.style.display = 'block';
+  img.src = IMAGES[trial.order[0]].src;
+
+  playAnimation(trial, () => {
+    showQuestion();
+  });
+}
+
+function showQuestion() {
+  img.style.display = 'block';
+  document.getElementById('tip').innerHTML = '<strong>画面中物体的运动方向是？</strong>';
+  trialStartTime = performance.now();
+
+  const labels = ['向左很强','向左中等','向左轻微','完全不动/看不清','向右轻微','向右中等','向右很强'];
+  const values = [-3,-2,-1,0,1,2,3];
+
+  document.getElementById('options').innerHTML = values.map((v,i) =>
+    `<button class="opt-btn" onclick="answer(${v})">${labels[i]}</button>`
+  ).join('');
+}
+
+function answer(score) {
+  answers.push({ trial: trials[trialIdx], score, rt: performance.now()-trialStartTime });
+  trialIdx++;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+  runTrial();
+}
+
+// ============ SCORING ============
+function showResult() {
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('tip').innerHTML = '验证完成';
+  document.getElementById('progress').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${trials.length}/${trials.length}`;
+
+  let total = 100;
+  const normal = answers.filter(a => a.trial.type === 'normal');
+  const catchReverse = answers.find(a => a.trial.catchType === 'reverse_order');
+  const catchBroken = answers.find(a => a.trial.catchType === 'broken');
+  let dirOk = 0;
+
+  // 1. 正向四冲程 (40分): 应感知右移(正)
+  normal.forEach(a => {
+    if (a.score > 0) dirOk++;
+    if (a.score < 0) total -= 14;
+    if (a.score === 0) total -= 6;
+  });
+
+  // 2. 逆序播放捕捉 (30分): 应感知左移(负) — 关键！逆序逆转运动方向
+  if (catchReverse) {
+    if (catchReverse.score < 0) { /* 正确！逆序→左移 */ }
+    else if (catchReverse.score > 0) total -= 28; // 逆序还看到右移=可能是AI/随机
+    // score=0 可接受（逆序可能感受较弱）
+  }
+
+  // 3. 超慢速捕捉 (30分): 200ms/帧，应看不清运动
+  if (catchBroken) {
+    const abs = Math.abs(catchBroken.score);
+    if (abs >= 2) total -= 28;
+    else if (abs >= 1) total -= 14;
+  }
+
+  const rts = answers.map(a => a.rt);
+  const rtVar = Math.max(...rts) - Math.min(...rts);
+  if (rtVar < 70) total -= 8;
+
+  total = Math.max(0, Math.min(100, Math.round(total)));
+  const passed = total >= 60;
+
+  const box = document.getElementById('result');
+  box.className = 'result-box ' + (passed ? 'pass' : 'fail');
+  document.getElementById('result-title').textContent = passed ? '✓ 验证通过' : '✗ 验证失败';
+  document.getElementById('result-desc').textContent = `得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent =
+    `正向正确: ${dirOk}/${normal.length}（正序→右移）| 逆序捕捉: ${catchReverse?.score<0?'✓左移':'✗'}`;
+
+  console.log('Reverse Phi answers:', answers.map(a => ({
+    score:a.score, R:a.trial.rateR, ms:a.trial.rateMs, ord:a.trial.order, type:a.trial.type
+  })));
+}
+
+function restart() {
+  document.getElementById('result').className = 'result-box';
+  document.getElementById('result').style.display = 'none';
+  trials = generateTrials(); trialIdx = 0; answers = [];
+  document.getElementById('progress').style.width = '0%';
+  document.getElementById('progress-label').textContent = '0/5';
+  runTrial();
+}
+
+init();
+</script>
+</body>
+</html>

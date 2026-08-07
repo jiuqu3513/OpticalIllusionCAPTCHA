@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>螺旋后效 CAPTCHA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+  .back { align-self: flex-start; padding: 8px 16px; color: #94a3b8; text-decoration: none; font-size: 13px; margin: 16px; }
+  .back:hover { color: #e2e8f0; }
+  .container { width: 100%; max-width: 520px; background: #1e293b; border-radius: 16px; padding: 28px; margin: 0 20px 40px; border: 1px solid #334155; }
+  h2 { font-size: 20px; text-align: center; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .instruction { background: #0f172a; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #94a3b8; line-height: 1.6; text-align: center; }
+  .instruction strong { color: #f87171; }
+  canvas { display: block; margin: 0 auto; }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .progress-bar { flex: 1; height: 4px; background: #334155; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #60a5fa; width: 0%; transition: width 0.3s; }
+  .progress-label { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .opt-btn { padding: 10px 16px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e2e8f0; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .opt-btn:hover { background: #1e3a5f; border-color: #60a5fa; }
+  .opt-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .result-box { margin-top: 20px; padding: 18px; border-radius: 10px; text-align: center; display: none; }
+  .result-box.pass { background: #052e16; border: 1px solid #166534; color: #4ade80; display: block; }
+  .result-box.fail { background: #450a0a; border: 1px solid #991b1b; color: #f87171; display: block; }
+  .result-box h3 { margin-bottom: 6px; font-size: 18px; }
+  .result-box p { font-size: 13px; opacity: 0.9; }
+  .score-detail { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+  .restart-btn { margin-top: 12px; padding: 10px 28px; background: #2563eb; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .restart-btn:hover { background: #1d4ed8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<a href="../../" class="back">← 首页</a>
+
+<div class="container">
+  <h2>🌀 螺旋后效验证</h2>
+  <p class="subtitle">Spiral Aftereffect — 适应旋转螺旋后，静止圆环看起来反向旋转</p>
+
+  <div class="instruction" id="tip">
+    即将开始验证。请<strong>死死盯住中心的红色十字</strong>，不要追视螺旋旋转。
+  </div>
+
+  <canvas id="canvas" width="440" height="440"></canvas>
+
+  <div class="progress-row">
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div class="progress-label" id="progress-label">0/4</div>
+  </div>
+
+  <div class="options" id="options"></div>
+
+  <div class="result-box" id="result">
+    <h3 id="result-title"></h3>
+    <p id="result-desc"></p>
+    <div class="score-detail" id="score-detail"></div>
+    <button class="restart-btn" onclick="restart()">重新验证</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 关键设计：适应刺激 ≠ 测试刺激
+//   适应：高对比度 4 臂螺旋顺时针旋转
+//   测试：同心圆环（无方向特征的圆形图案）
+//   后效：圆环看起来逆时针旋转
+//   参考：mot-adaptSpiral 使用预渲染 PNG，旋转 180°/s
+// ============================================================
+
+const CFG = {
+  adaptationSec: 8.0,
+  blankMs: 300,
+  rotationSpeed: 150,    // ⬆ 更快旋转 度/秒
+  arms: 4,
+  twist: 0.05,
+};
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2, MAX_R = Math.min(W,H)*0.44;
+
+let trials, trialIdx, answers, animId, rotationDeg, trialStartTime;
+let SPIRAL_CACHE = null;   // 预渲染螺旋
+let RINGS_CACHE = null;    // 预渲染同心圆环（测试用）
+
+// ============ 预渲染螺旋（高对比度） ============
+function createSpiral() {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const cx = c.getContext('2d');
+  const img = cx.createImageData(W, H);
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx = x - CX, dy = y - CY;
+      const r = Math.sqrt(dx*dx+dy*dy);
+      const theta = Math.atan2(dy, dx);
+      const idx = (y*W + x)*4;
+      if (r < MAX_R && r > 6) {
+        const phase = CFG.arms * (theta + r * CFG.twist);
+        // 更高对比度：方波
+        const v = Math.sin(phase) > 0.08 ? 255 : 0;
+        img.data[idx]=img.data[idx+1]=img.data[idx+2]=v; img.data[idx+3]=255;
+      } else {
+        // 外围和中心：中灰
+        img.data[idx]=img.data[idx+1]=img.data[idx+2]=128; img.data[idx+3]=255;
+      }
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  return c;
+}
+
+// ============ 预渲染同心圆环（测试用，无旋转特征） ============
+function createRings() {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const cx = c.getContext('2d');
+  cx.fillStyle = '#808080';
+  cx.fillRect(0, 0, W, H);
+
+  // 画同心圆环
+  const ringW = 8, gapW = 12;
+  cx.strokeStyle = '#d0d0d0';
+  for (let r = ringW/2; r < MAX_R; r += ringW + gapW) {
+    cx.lineWidth = ringW;
+    cx.beginPath();
+    cx.arc(CX, CY, r, 0, Math.PI*2);
+    cx.stroke();
+  }
+  return c;
+}
+
+// ============ 注视十字 ============
+function drawFixation() {
+  const sz = 14;
+  ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(CX-sz, CY); ctx.lineTo(CX+sz, CY);
+  ctx.moveTo(CX, CY-sz); ctx.lineTo(CX, CY+sz);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(239,68,68,0.4)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CX, CY, sz+3, 0, Math.PI*2); ctx.stroke();
+}
+
+function drawSpiral(angleDeg) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(angleDeg * Math.PI/180);
+  ctx.drawImage(SPIRAL_CACHE, -W/2, -H/2);
+  ctx.restore();
+}
+
+function drawTestScene() {
+  // 画同心圆环（完全不同的图案！）
+  ctx.drawImage(RINGS_CACHE, 0, 0);
+  drawFixation();
+}
+
+// ============ TRIALS ============
+function generateTrials() {
+  const t = [];
+  for (let i = 0; i < 3; i++) {
+    t.push({
+      type: 'normal', rotDir: 'cw',
+      duration: CFG.adaptationSec + (Math.random()-0.5)*1.5,
+      expectedSign: -1, // 适应顺时针→后效逆时针(负)
+    });
+  }
+  t.push({ type: 'catch', catchType: 'zero', duration: 0, expectedSign: 0 });
+  return t.sort(() => Math.random()-0.5);
+}
+
+// ============ FLOW ============
+SPIRAL_CACHE = createSpiral();
+RINGS_CACHE = createRings();
+trials = generateTrials();
+trialIdx = 0; answers = [];
+console.log('Spiral trials:', trials.map(t => ({type:t.type, dur:t.duration?.toFixed(1)})));
+
+function runTrial() {
+  if (trialIdx >= trials.length) { showResult(); return; }
+  const trial = trials[trialIdx];
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('progress-label').textContent = `${trialIdx+1}/${trials.length}`;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+
+  if (trial.duration === 0) {
+    document.getElementById('tip').innerHTML = '准备观察同心圆环...';
+    drawTestScene();
+    setTimeout(() => showTest(), 500);
+  } else {
+    document.getElementById('tip').innerHTML = '准备注视中心<strong>红色十字</strong>...';
+    drawSpiral(0); drawFixation();
+    setTimeout(() => startAdapt(trial), 600);
+  }
+}
+
+function startAdapt(trial) {
+  let elapsed = 0, lastTime = performance.now();
+  rotationDeg = 0;
+  document.getElementById('tip').innerHTML = '🔴 <strong>死盯中心十字！不要追视旋转！</strong>';
+
+  function anim(now) {
+    const dt = Math.min((now-lastTime)/1000, 0.1);
+    lastTime = now; elapsed += dt;
+    rotationDeg += CFG.rotationSpeed * dt;
+    drawSpiral(rotationDeg); drawFixation();
+
+    if (elapsed < trial.duration) {
+      animId = requestAnimationFrame(anim);
+    } else {
+      ctx.fillStyle = '#808080'; ctx.fillRect(0,0,W,H); drawFixation();
+      setTimeout(() => showTest(), CFG.blankMs);
+    }
+  }
+  animId = requestAnimationFrame(anim);
+}
+
+function showTest() {
+  drawTestScene();
+  document.getElementById('tip').innerHTML = '圆环静止了。<strong>它们看起来在往哪个方向旋转？</strong>';
+  trialStartTime = performance.now();
+
+  const labels = ['逆时针很强','逆时针中等','逆时针轻微','完全不动','顺时针轻微','顺时针中等','顺时针很强'];
+  const values = [-3,-2,-1,0,1,2,3];
+  document.getElementById('options').innerHTML = values.map((v,i) =>
+    `<button class="opt-btn" onclick="answer(${v})">${labels[i]}</button>`
+  ).join('');
+}
+
+function answer(score) {
+  answers.push({ trial: trials[trialIdx], score, rt: performance.now()-trialStartTime });
+  trialIdx++;
+  document.getElementById('progress').style.width = (trialIdx/trials.length*100)+'%';
+  runTrial();
+}
+
+function showResult() {
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('tip').innerHTML = '验证完成';
+  document.getElementById('progress').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${trials.length}/${trials.length}`;
+
+  let total = 100;
+  const normal = answers.filter(a => a.trial.type === 'normal');
+  const catchTrial = answers.find(a => a.trial.type === 'catch');
+  let dirOk = 0;
+
+  normal.forEach(a => {
+    if (a.score < 0) dirOk++;
+    if (a.score > 0) total -= 14;
+    if (a.score === 0) total -= 8;
+  });
+  if (catchTrial) {
+    const abs = Math.abs(catchTrial.score);
+    if (abs >= 2) total -= 35; else if (abs >= 1) total -= 22;
+  }
+  const rts = answers.map(a => a.rt);
+  const rtVar = Math.max(...rts) - Math.min(...rts);
+  if (rtVar < 85) total -= 15;
+
+  total = Math.max(0, Math.min(100, Math.round(total)));
+  const passed = total >= 60;
+
+  const box = document.getElementById('result');
+  box.className = 'result-box ' + (passed ? 'pass' : 'fail');
+  document.getElementById('result-title').textContent = passed ? '✓ 验证通过' : '✗ 验证失败';
+  document.getElementById('result-desc').textContent = `得分: ${total}/100 (阈值: 60)`;
+  document.getElementById('score-detail').textContent =
+    `方向正确: ${dirOk}/${normal.length}（适应顺时→圆环应显逆时旋转） | RT波动: ${Math.round(rtVar)}ms`;
+  console.log('Spiral answers:', answers.map(a => ({score:a.score, rt:Math.round(a.rt)})));
+}
+
+function restart() {
+  document.getElementById('result').className = 'result-box';
+  document.getElementById('result').style.display = 'none';
+  trials = generateTrials(); trialIdx = 0; answers = [];
+  document.getElementById('progress').style.width = '0%';
+  document.getElementById('progress-label').textContent = '0/4';
+  runTrial();
+}
+
+runTrial();
+</script>
+</body>
+</html>

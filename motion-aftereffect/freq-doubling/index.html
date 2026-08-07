@@ -1,0 +1,150 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frequency Doubling CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:560px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.retake-row{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
+.retake-btn{padding:6px 14px;border:1px solid #475569;border-radius:6px;background:#0f172a;color:#94a3b8;cursor:pointer;font-size:11px}
+.retake-btn:hover{border-color:#60a5fa;color:#e2e8f0}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.scoring-table{width:100%;margin:12px 0;border-collapse:collapse;font-size:11px}
+.scoring-table td,.scoring-table th{padding:5px 8px;border:1px solid #334155;text-align:center}
+.scoring-table th{background:#1a2230;color:#94a3b8;font-weight:600}
+.scoring-table .ok{color:#4ade80}.scoring-table .fail{color:#f87171}
+.feedback-section{margin-top:20px;padding:16px;background:#0f172a;border-radius:10px;display:none}
+.feedback-section h4{font-size:14px;margin-bottom:10px}
+.fb-item{margin-bottom:12px;padding:10px;background:#1a2230;border-radius:8px}
+.feedback-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;align-items:center}
+.feedback-row label{font-size:11px;color:#94a3b8;white-space:nowrap;min-width:55px}
+.radio-label{font-size:11px;color:#64748b;cursor:pointer;display:inline-flex;align-items:center;gap:2px}
+.radio-label input[type=radio]{accent-color:#60a5fa;cursor:pointer}
+.radio-hint{font-size:10px;color:#475569;margin-left:4px}
+.feedback-text{width:100%;padding:6px 8px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#94a3b8;font-size:11px;resize:vertical;min-height:36px;font-family:inherit}
+.submit-btn{padding:8px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;margin-top:8px}
+.submit-btn:hover{background:#1d4ed8}.thanks{color:#4ade80;font-size:12px;margin-top:6px;display:none}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>📊 Frequency Doubling</h2><p class="subtitle">频率倍增错觉 — 人眼看到双倍条纹数，AI 只能数物理像素</p>
+<div class="instruction" id="tip">观察竖条纹。<strong>你看到多少条条纹？</strong>（相比物理数量）</div>
+<canvas id="c" width="480" height="260"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="retake-row" id="retake"></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p>
+<table class="scoring-table"><thead><tr><th>评分项</th><th>满分</th><th>得分</th><th>说明</th></tr></thead><tbody id="st"></tbody></table>
+<div class="score-detail" id="sd"></div>
+<button class="restart-btn" onclick="rst()">重新验证</button>
+</div>
+<div class="feedback-section" id="fb"><h4>📝 反馈 (全部选填)</h4>
+<div class="fb-item"><div class="feedback-row"><label>🖼️ 图案效果:</label>
+<label class="radio-label"><input type="radio" name="img" value="1">1</label><label class="radio-label"><input type="radio" name="img" value="2">2</label><label class="radio-label"><input type="radio" name="img" value="3">3</label><label class="radio-label"><input type="radio" name="img" value="4">4</label><label class="radio-label"><input type="radio" name="img" value="5">5</label><span class="radio-hint">1=完全看不出 5=效果极明显</span></div>
+<textarea class="feedback-text" placeholder="图案效果建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>🔘 选项设计:</label>
+<label class="radio-label"><input type="radio" name="opt" value="1">1</label><label class="radio-label"><input type="radio" name="opt" value="2">2</label><label class="radio-label"><input type="radio" name="opt" value="3">3</label><label class="radio-label"><input type="radio" name="opt" value="4">4</label><label class="radio-label"><input type="radio" name="opt" value="5">5</label><span class="radio-hint">1=完全不合理 5=非常合理</span></div>
+<textarea class="feedback-text" placeholder="选项设计建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>📏 评分标准:</label>
+<label class="radio-label"><input type="radio" name="score" value="1">1</label><label class="radio-label"><input type="radio" name="score" value="2">2</label><label class="radio-label"><input type="radio" name="score" value="3">3</label><label class="radio-label"><input type="radio" name="score" value="4">4</label><label class="radio-label"><input type="radio" name="score" value="5">5</label><span class="radio-hint">1=完全不合理 5=非常合理</span></div>
+<textarea class="feedback-text" placeholder="评分标准建议…"></textarea></div>
+<div class="fb-item"><div class="feedback-row"><label>🤖 AI 抗性:</label>
+<label class="radio-label"><input type="radio" name="ai" value="1">1</label><label class="radio-label"><input type="radio" name="ai" value="2">2</label><label class="radio-label"><input type="radio" name="ai" value="3">3</label><label class="radio-label"><input type="radio" name="ai" value="4">4</label><label class="radio-label"><input type="radio" name="ai" value="5">5</label><span class="radio-hint">1=极易攻破 5=极难攻破</span></div>
+<textarea class="feedback-text" placeholder="AI 攻破分析…"></textarea></div>
+<button class="submit-btn" onclick="submitFB()">提交反馈</button><span class="thanks" id="thx">✓ 感谢反馈!</span>
+</div></div>
+<script src="../../js/collector.js"></script>
+<script>
+// 精确复刻 mot-freqDoubling: 竖线亮度 cos 波, polarity 翻转, framesPerPhase 控制频率感知
+const c=document.getElementById('c'),x=c.getContext('2d'),W=480,H=260;
+const CONTRAST=80;
+let cosVals=[],polarity=1;
+
+function initCos(periodsPerView){
+  cosVals=[];let ppc=W/periodsPerView,x2r=2*Math.PI/ppc;
+  for(let i=0;i<W;i++)cosVals.push(Math.cos(i*x2r));
+}
+
+function draw(periodsPerView,framesPerPhase){
+  x.fillStyle='#808080';x.fillRect(0,0,W,H);
+  for(let ix=0;ix<W;ix++){
+    let l=(1+CONTRAST/100*cosVals[ix]*polarity)/2;
+    x.strokeStyle=`rgb(${Math.round(l*255)},${Math.round(l*255)},${Math.round(l*255)})`;x.lineWidth=1.5;
+    x.beginPath();x.moveTo(ix,0);x.lineTo(ix,H);x.stroke();
+  }
+}
+
+let trials,tIdx,answers,animId,tStart,fc=0,fpCount=0;
+function gen(){let t=[];
+// 频率倍增: framesPerPhase 大 → 感知双倍条纹
+t.push({type:'normal',periods:2,fpp:2,expCount:2});     // 低频+快闪 → 看到2条
+t.push({type:'normal',periods:2,fpp:16,expCount:4});    // 低频+慢闪 → 频率倍增,看到4条
+t.push({type:'normal',periods:8,fpp:2,expCount:8});     // 中频+快闪 → 看到8条
+t.push({type:'catch',ct:'highFpp',periods:8,fpp:16,expCount:16}); // 中频+慢闪 → 频率倍增,看到16条
+return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+document.getElementById('retake').innerHTML=trials.map((_,i)=>`<button class="retake-btn" onclick="retry(${i})">第${i+1}题</button>`).join('');
+initCos(tr.periods);polarity=1;fc=0;fpCount=0;
+document.getElementById('tip').innerHTML=`<strong>观察条纹数量…</strong>`;
+setTimeout(()=>startAnim(tr),400)}
+
+function startAnim(tr){let elapsed=0,lt=performance.now(),lastSwitch=0;
+function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;fc++;
+  if(fc>=tr.fpp){polarity*=-1;fc=0}
+  draw(tr.periods,tr.fpp);
+  if(elapsed<3)animId=requestAnimationFrame(anim);else showQ(tr)}
+animId=requestAnimationFrame(anim)}
+
+function showQ(tr){tStart=performance.now();
+document.getElementById('tip').innerHTML='<strong>你看到大约多少条竖条纹？</strong>';
+let opts=new Set([tr.expCount,tr.periods,tr.periods*2,1]);
+while(opts.size<5)opts.add(Math.floor(2+Math.random()*20));
+let sorted=[...opts].sort((a,b)=>a-b);
+document.getElementById('op').innerHTML=sorted.map(v=>`<button class="opt-btn" onclick="ans(${v},${tr.expCount})">${v} 条</button>`).join('')}
+
+function ans(answer,expected){let rt=performance.now()-tStart;answers.push({trial:trials[tIdx],answer,expected,rt});DataCollector.trials.push({answer,expected,rt,trialType:trials[tIdx].type||'normal'});tIdx++;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function retry(i){tIdx=i;document.getElementById('pg').style.width=(i/trials.length*100)+'%';answers=answers.slice(0,i);run()}
+
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('retake').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let norm=answers.filter(a=>a.trial.type==='normal');
+let dur=0;norm.forEach(a=>{if(Math.abs(a.answer-a.expected)<=1)dur++;});
+let catchT=answers.find(a=>a.trial.ct==='highFpp');
+let catchOk=catchT&&Math.abs(catchT.answer-catchT.expected)<=2;
+let total=Math.round(dur/norm.length*40+(catchOk?35:0)+25);
+total=Math.max(0,Math.min(100,total));
+let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';
+document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
+document.getElementById('st').innerHTML=`
+<tr><td>频率倍增感知</td><td>40</td><td class="${dur>=2?'ok':'fail'}">${Math.round(dur/norm.length*40)}</td><td>慢闪时应感知双倍条纹数 (${dur}/${norm.length})</td></tr>
+<tr><td>捕捉试次</td><td>35</td><td class="${catchOk?'ok':'fail'}">${catchOk?35:0}</td><td>高fpp应感知更多条纹</td></tr>
+<tr><td>基础分</td><td>25</td><td>25</td><td>完成全部试次</td></tr>`;
+box.style.display='block';document.getElementById('fb').style.display='block';DataCollector.submitResult('freq-doubling',total,total>=60)}
+function rst(){document.getElementById('re').style.display='none';document.getElementById('fb').style.display='none';trials=gen();tIdx=0;answers=[];DataCollector.trials=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+
+function submitFB(){
+  let getRadio=name=>{let r=document.querySelector(`input[name="${name}"]:checked`);return r?parseInt(r.value):0};
+  let getText=i=>document.querySelectorAll('.feedback-text')[i]?.value||'';
+  let fb={page:'freq-doubling',img:{rating:getRadio('img'),comment:getText(0)},opt:{rating:getRadio('opt'),comment:getText(1)},score:{rating:getRadio('score'),comment:getText(2)},ai:{rating:getRadio('ai'),comment:getText(3)}};
+DataCollector.submitFeedback('freq-doubling',fb);
+  document.querySelectorAll('.feedback-text').forEach(t=>t.value='');
+  document.querySelectorAll('input[type=radio]').forEach(r=>r.checked=false);
+  document.getElementById('thx').style.display='inline';setTimeout(()=>document.getElementById('thx').style.display='none',3000)}
+run();</script></body></html>

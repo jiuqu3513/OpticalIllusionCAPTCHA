@@ -1,0 +1,51 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motion Silences Hue CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:540px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.score-detail{font-size:11px;color:#94a3b8;margin-top:8px}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.restart-btn:hover{background:#1d4ed8}.hidden{display:none!important}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🎨 Motion Silences Hue</h2>
+<p class="subtitle">运动抑制颜色变化感知 — 2011 年错觉大赛冠军</p>
+<div class="instruction" id="tip">注视中心十字。<strong>圆环来回旋转时，圆点的颜色在变化吗？</strong></div>
+<canvas id="c" width="460" height="460"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><div class="score-detail" id="sd"></div><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script>
+// 精确复刻 mot-silencing: 100色盘环, hue每帧+1.5°, 环±30°摆动
+const c=document.getElementById('c'),x=c.getContext('2d'),W=460,H=460,CX=W/2,CY=H/2;
+const N=100,RR=150,RW=35,RD=9;
+let disks=[],rotAngle=0,rotDir=1,hueMod=true;
+for(let i=0;i<N;i++){let ok=false;while(!ok){let rx=2*RR*(Math.random()*2-1),ry=2*RR*(Math.random()*2-1);let r=Math.sqrt(rx*rx+ry*ry);if(r>RR-RW&&r<RR+RW){ok=true;for(let j=0;j<i;j++){if(Math.hypot(rx-disks[j].x,ry-disks[j].y)<2.1*RD){ok=false;break}}if(ok)disks.push({x:rx,y:ry,h:Math.random()*360});}}}
+let trials,tIdx,answers,animId,tStart;
+function gen(){let t=[];t.push({type:'normal',hueOn:true,exp:'silenced'});t.push({type:'normal',hueOn:true,exp:'silenced'});t.push({type:'catch',ct:'noMotion',hueOn:true,static:true,exp:'visible'});t.push({type:'catch',ct:'noHue',hueOn:false,exp:'noChange'});return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+function draw(rotAng){x.fillStyle='#808080';x.fillRect(0,0,W,H);x.save();x.translate(CX,CY);x.rotate(rotAng*Math.PI/180);x.strokeStyle='#00f';x.lineWidth=3;x.lineCap='round';x.beginPath();x.moveTo(-8,0);x.lineTo(8,0);x.moveTo(0,-8);x.lineTo(0,8);x.stroke();disks.forEach(d=>{x.fillStyle=`hsl(${d.h},100%,50%)`;x.beginPath();x.arc(d.x,d.y,RD,0,Math.PI*2);x.fill()});x.restore()}
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';document.getElementById('tip').innerHTML=tr.static?'圆环<strong>不旋转</strong>。圆点颜色在变化吗？':tr.hueOn?'圆环来回旋转。<strong>圆点颜色在变吗？</strong>':'圆环旋转。<strong>圆点颜色在变吗？</strong>';rotAngle=0;rotDir=1;draw(0);setTimeout(()=>startAnim(tr),500)}
+function startAnim(tr){let elapsed=0,lt=performance.now();hueMod=tr.hueOn;function anim(now){let dt=Math.min((now-lt)/1000,.1);lt=now;elapsed+=dt;if(!tr.static){rotAngle+=60*dt*rotDir;if(Math.abs(rotAngle)>30){rotAngle-=60*dt*rotDir;rotDir*=-1;if(Math.abs(rotAngle)>50)rotAngle=0}}if(hueMod)disks.forEach(d=>d.h=(d.h+1.5)%360);draw(rotAngle);if(elapsed<3.5)animId=requestAnimationFrame(anim);else showQ(tr)}animId=requestAnimationFrame(anim)}
+function showQ(tr){draw(0);tStart=performance.now();document.getElementById('tip').innerHTML=tr.hueOn?'<strong>圆环旋转/静止时，颜色变化明显吗？</strong>':'<strong>圆点的颜色在变化吗？</strong>';document.getElementById('op').innerHTML=(tr.hueOn?['颜色一直在变且很明显','颜色在变但不太明显','不确定','感觉没怎么变','完全没看到颜色变化']:['明显在变色','有些变色','不确定','基本不变','完全不变']).map((l,i)=>`<button class="opt-btn" onclick="ans(${2-i})">${l}</button>`).join('')}
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let noMot=answers.find(a=>a.trial.ct==='noMotion');let noHue=answers.find(a=>a.trial.ct==='noHue');norm.forEach(a=>{if(a.score<=0){}else total-=18});if(noMot&&noMot.score<=0)total-=30;if(noHue&&noHue.score>0)total-=30;total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;document.getElementById('sd').textContent=`运动抑制: ${norm.filter(a=>a.score<=0).length}/${norm.length} | 无运动对照: ${noMot?.score>0?'✓':'✗'} | 无变色: ${noHue?.score<=0?'✓':'✗'}`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';disks.forEach(d=>d.h=Math.random()*360);trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+run();</script></body></html>
