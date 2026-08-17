@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pyramid Illusion CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:560px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}.restart-btn:hover{background:#1d4ed8}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🔺 Pyramid Illusion</h2><p class="subtitle">金字塔错觉 — 同心方形台阶的亮度感知被边缘强化</p>
+<div class="instruction" id="tip">观察同心方形的台阶。<strong>台阶边缘清晰吗？是否呈现立体感？</strong></div>
+<canvas id="c" width="480" height="480"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
+<script>
+// 复刻 lum-pyramid: 同心方形台阶, 灰度从中心向外变化
+const c=document.getElementById('c'),x=c.getContext('2d'),W=480,H=480;
+function draw(nSteps,colorScheme){
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  const cx=W/2,cy=H/2,maxSize=W;
+  for(let i=nSteps;i>0;i--){
+    const size=maxSize*i/nSteps;
+    const colorValue=1-(i/nSteps);
+    let r=255,g=255,b=255;
+    if(colorScheme===0){r=255;g=Math.round(colorValue*255);b=Math.round(colorValue*255)} // 青→蓝
+    else if(colorScheme===1){r=Math.round(colorValue*255);g=255;b=Math.round(colorValue*255)} // 紫
+    else {r=Math.round(colorValue*255);g=Math.round(colorValue*255);b=255} // 蓝
+    x.fillStyle=`rgb(${r},${g},${b})`;
+    x.fillRect(cx-size/2,cy-size/2,size,size);
+  }
+}
+let trials,tIdx,answers,tStart;
+function gen(){let t=[
+  {type:'normal',steps:12,scheme:0,exp:'steps'},
+  {type:'normal',steps:8,scheme:2,exp:'steps'},
+  {type:'normal',steps:20,scheme:1,exp:'steps'},
+  {type:'catch',ct:'smooth',steps:60,scheme:2,exp:'smooth'}, // 很多阶≈平滑
+];return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+draw(tr.steps,tr.scheme);
+document.getElementById('tip').innerHTML='<strong>观察台阶。</strong>边缘清晰呈台阶状吗？还是平滑渐变？';
+tStart=performance.now();setTimeout(()=>showQ(),3000)}
+function showQ(){tStart=performance.now();document.getElementById('tip').innerHTML='<strong>图形看起来是？</strong>';
+document.getElementById('op').innerHTML=['清晰台阶状','较清晰台阶','轻微台阶','平滑渐变','看不清'].map((l,i)=>`<button class="opt-btn" onclick="ans(${2-i})">${l}</button>`).join('')}
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let total=100;let norm=answers.filter(a=>a.trial.type==='normal');let smooth=answers.find(a=>a.trial.ct==='smooth');
+norm.forEach(a=>{if(a.score>0){}else total-=16});
+if(smooth&&smooth.score<0)total-=25; // 平滑应感知渐变不是台阶
+total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+run();</script></body></html>

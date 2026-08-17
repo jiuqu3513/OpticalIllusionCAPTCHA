@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grid Masking CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:560px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}.restart-btn:hover{background:#1d4ed8}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>🐱 Grid Masking</h2><p class="subtitle">栅栏遮蔽 — 图案藏在正弦光栅后，参数决定能否看到</p>
+<div class="instruction" id="tip"><strong>观察栅栏。</strong>栅栏后藏着什么图案？</div>
+<canvas id="c" width="500" height="500"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/4</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
+<script>
+// 复刻 lum-gridMasking: 猫图 + 正弦光栅(period,contrast,alpha) → 遮蔽图案
+const c=document.getElementById('c'),x=c.getContext('2d'),W=500,H=500;
+let catImg=new Image();catImg.src='Cat500.png';let loaded=false;catImg.onload=()=>loaded=true;
+
+function draw(period,contrast,alpha){
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  if(loaded)x.drawImage(catImg,0,0,500,500);
+  x.strokeStyle='#000';x.lineWidth=1.5;
+  const x2r=2*Math.PI/period,dx=period/8;
+  for(let ix=-W;ix<W;ix++){
+    let a=Math.cos((ix+dx)*x2r);
+    let l=(1+contrast*a/100)/2;
+    x.strokeStyle=`rgba(${Math.round(l*255)},${Math.round(l*255)},${Math.round(l*255)},${alpha/100})`;
+    x.beginPath();x.moveTo(ix,0);x.lineTo(ix,H);x.stroke();
+  }
+}
+let trials,tIdx,answers,tStart;
+function gen(){let t=[];
+// 正常: 中等遮蔽 → 图案若隐若现
+t.push({type:'normal',period:16,contrast:99,alpha:85,exp:'hidden'});
+t.push({type:'normal',period:24,contrast:90,alpha:90,exp:'hidden'});
+// catch: 低对比/低alpha → 图案清晰可见
+t.push({type:'catch',ct:'clear',period:32,contrast:30,alpha:30,exp:'clear'});
+// catch: 高对比全遮蔽 → 几乎看不到
+t.push({type:'catch',ct:'full',period:8,contrast:99,alpha:95,exp:'full'});
+return t.sort(()=>Math.random()-.5)}
+trials=gen();tIdx=0;answers=[];
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+draw(tr.period,tr.contrast,tr.alpha);
+document.getElementById('tip').innerHTML='<strong>观察栅栏。</strong>你能看清背后是什么图案吗？';
+tStart=performance.now();setTimeout(()=>showQ(),3000)}
+function showQ(){tStart=performance.now();document.getElementById('tip').innerHTML='<strong>栅栏后藏着什么图案？</strong>';
+document.getElementById('op').innerHTML=['猫/动物','人脸','建筑物','风景','完全看不清'].map((l,i)=>`<button class="opt-btn" onclick="ans(${i})">${l}</button>`).join('')}
+function ans(s){answers.push({trial:trials[tIdx],score:s,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let total=100;let clear=answers.find(a=>a.trial.ct==='clear');let full=answers.find(a=>a.trial.ct==='full');
+// 清晰catch: 应看到猫(score=0)
+if(clear&&clear.score===0){}else if(clear)total-=30;
+// 全遮蔽catch: 应看不清(score=4)
+if(full&&full.score===4){}else if(full)total-=20;
+// 正常: 不强求
+total=Math.max(0,Math.min(100,Math.round(total)));let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60)`;
+document.getElementById('sd').textContent=``;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/4';run()}
+if(!loaded)catImg.onload=()=>{loaded=true};
+run();</script></body></html>

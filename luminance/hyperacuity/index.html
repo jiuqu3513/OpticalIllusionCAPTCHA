@@ -1,0 +1,76 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hyperacuity CAPTCHA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.back{align-self:flex-start;padding:8px 16px;color:#94a3b8;text-decoration:none;font-size:13px;margin:16px}.back:hover{color:#e2e8f0}
+.container{width:100%;max-width:560px;background:#1e293b;border-radius:16px;padding:28px;margin:0 20px 40px;border:1px solid #334155}
+h2{font-size:20px;text-align:center;margin-bottom:4px}.subtitle{text-align:center;font-size:12px;color:#64748b;margin-bottom:20px}
+.instruction{background:#0f172a;border-radius:8px;padding:14px;margin-bottom:20px;font-size:13px;color:#94a3b8;line-height:1.6;text-align:center}
+.instruction strong{color:#f87171}canvas{display:block;margin:0 auto;border-radius:10px;background:#fff}
+.progress-row{display:flex;align-items:center;gap:10px;margin-top:16px}
+.progress-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#60a5fa;width:0%;transition:width .3s}
+.progress-label{font-size:12px;color:#64748b;white-space:nowrap}
+.options{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.opt-btn{padding:10px 16px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .15s}
+.opt-btn:hover{background:#1e3a5f;border-color:#60a5fa}.opt-btn:disabled{opacity:.4;cursor:not-allowed}
+.result-box{margin-top:20px;padding:18px;border-radius:10px;text-align:center;display:none}
+.result-box.pass{background:#052e16;border:1px solid #166534;color:#4ade80;display:block}
+.result-box.fail{background:#450a0a;border:1px solid #991b1b;color:#f87171;display:block}
+.result-box h3{margin-bottom:6px;font-size:18px}.result-box p{font-size:13px;opacity:.9}
+.restart-btn{margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}.restart-btn:hover{background:#1d4ed8}
+</style></head><body>
+<a href="../../" class="back">← 首页</a>
+<div class="container">
+<h2>👁️ Visual Acuity ↔ Hyperacuity</h2><p class="subtitle">视觉超敏度 — 判断缺口方向，交互式渐进难度</p>
+<div class="instruction" id="tip">观察 Landolt C 缺口方向。<strong>缺口朝哪？</strong></div>
+<canvas id="c" width="360" height="360"></canvas>
+<div class="progress-row"><div class="progress-bar"><div class="progress-fill" id="pg"></div></div><div class="progress-label" id="pl">0/5</div></div>
+<div class="options" id="op"></div>
+<div class="result-box" id="re"><h3 id="rt"></h3><p id="rd"></p><button class="restart-btn" onclick="rst()">重新验证</button></div>
+</div>
+<script src="../../js/collector.js"></script><script src="../../js/captcha-fw.js"></script>
+<script>
+// 复刻 lum-hyperacuity: Landolt C 缺口方向判断, gap 渐进缩小(难度增加)
+const c=document.getElementById('c'),x=c.getContext('2d'),W=360,H=360;
+const CX=W/2,CY=H/2;
+let direction=0,gap=40;
+function drawLandolt(){
+  x.fillStyle='#fff';x.fillRect(0,0,W,H);
+  x.strokeStyle='#000';x.lineWidth=20;x.lineCap='butt';
+  const R=120;
+  // 8方向缺口, 每个方向用弧表示(留缺口)
+  const angles=[0,45,90,135,180,225,270,315];
+  const a=angles[direction];
+  const gapRad=gap/100;
+  // 画弧, 缺口在 a 方向
+  x.beginPath();
+  x.arc(CX,CY,R,(a+gapRad)*Math.PI/180,(a+360-gapRad)*Math.PI/180);
+  x.stroke();
+  // 中心点
+  x.fillStyle='#ef4444';x.beginPath();x.arc(CX,CY,4,0,2*Math.PI);x.fill();
+}
+let trials,tIdx,answers,tStart;
+function gen(){let t=[];
+for(let i=0;i<4;i++)t.push({type:'normal',gap:30+i*5,direction:Math.floor(Math.random()*8),exp:'correct'});
+t.push({type:'catch',ct:'big',gap:60,direction:Math.floor(Math.random()*8),exp:'correct'});
+return t}
+trials=gen();tIdx=0;answers=[];
+function run(){if(tIdx>=trials.length){showR();return}let tr=trials[tIdx];
+document.getElementById('op').innerHTML='';document.getElementById('pl').textContent=`${tIdx+1}/${trials.length}`;
+document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';
+gap=tr.gap;direction=tr.direction;drawLandolt();
+document.getElementById('tip').innerHTML='<strong>缺口朝哪个方向？</strong>';
+tStart=performance.now();showQ()}
+function showQ(){tStart=performance.now();
+const labels=['上','右上','右','右下','下','左下','左','左上'];
+const values=[0,1,2,3,4,5,6,7];
+document.getElementById('op').innerHTML=labels.map((l,i)=>`<button class="opt-btn" onclick="ans(${values[i]})">${l}</button>`).join('')}
+function ans(s){let correct=s===direction;answers.push({trial:trials[tIdx],correct,rt:performance.now()-tStart});tIdx++;document.getElementById('pg').style.width=(tIdx/trials.length*100)+'%';run()}
+function showR(){document.getElementById('op').innerHTML='';document.getElementById('tip').innerHTML='验证完成';document.getElementById('pg').style.width='100%';document.getElementById('pl').textContent=`${trials.length}/${trials.length}`;
+let correct=answers.filter(a=>a.correct).length;
+let total=Math.round(correct/answers.length*100);
+let box=document.getElementById('re');box.className='result-box '+(total>=60?'pass':'fail');
+document.getElementById('rt').textContent=total>=60?'✓ 验证通过':'✗ 验证失败';document.getElementById('rd').textContent=`得分: ${total}/100 (阈值: 60, 正确率 ${correct}/${answers.length})`;box.style.display='block'}
+function rst(){document.getElementById('re').style.display='none';trials=gen();tIdx=0;answers=[];document.getElementById('pg').style.width='0%';document.getElementById('pl').textContent='0/5';run()}
+run();</script></body></html>
